@@ -65,9 +65,14 @@ void DisplayManager::drawProgress(const MenuSystem& menu) {
 
 void DisplayManager::drawMenu(const MenuSystem& menu) {
     display.clearDisplay(); display.setTextSize(2);
-    float centerY=24.0f; float offset = menu.getScrollPos() - floor(menu.getScrollPos()); int baseIndex = (int)floor(menu.getScrollPos()) % MenuSystem::MENU_COUNT; if (baseIndex<0) baseIndex+=MenuSystem::MENU_COUNT;
+    int count = menu.getMenuCount();
+    if (count <= 0) return;
+    float centerY=24.0f; float offset = menu.getScrollPos() - floor(menu.getScrollPos());
+    int baseIndex = (int)floor(menu.getScrollPos());
+    if (baseIndex < 0) baseIndex = 0; if (baseIndex >= count) baseIndex = count-1;
     for (int rel=-1; rel<=1; ++rel) {
-        int idx = (baseIndex + rel + MenuSystem::MENU_COUNT) % MenuSystem::MENU_COUNT; float logicalRow = (float)rel - offset; float y = centerY + logicalRow*24.0f; int yi=(int)y; bool isSelected = fabs(logicalRow) < 0.5f; const char* name = MenuSystem::MENU_NAMES[idx];
+    int idx = baseIndex + rel; if (idx < 0 || idx >= count) continue; float logicalRow = (float)rel - offset; float y = centerY + logicalRow*24.0f; int yi=(int)y; bool isSelected = (idx == menu.getMenuIndex()); const char* name = menu.getMenuName(idx);
+        if (yi < -20 || yi > 64) continue; // cull offscreen
         if (isSelected) { display.fillRect(0,yi,128,20,WHITE); display.setTextColor(BLACK,WHITE); display.setCursor(0,yi); display.print("> "); display.print(name);} else { display.setTextColor(WHITE,BLACK); display.setCursor(0,yi); display.print("  "); display.print(name);} }
 }
 

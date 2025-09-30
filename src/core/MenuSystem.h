@@ -5,6 +5,8 @@
 #include "Buttons.h"
 #include "Config.h"
 #include "Screensaver.h"
+#include "MenuItems/Help.h"
+#include "MenuItems/Saver.h"
 
 class MenuSystem {
 public:
@@ -18,7 +20,7 @@ public:
   float getScrollPos() const { return menuScrollPos; }
   int getSelectedMenu() const { return selectedMenu; }
   unsigned long getMenuResultStart() const { return menuResultStart; }
-  uint16_t getEditingSaverValue() const { return editingSaverValue; }
+  uint16_t getEditingSaverValue() const { return saverEdit.value(); }
 
   bool inSaverEdit() const { return state == State::SAVER_EDIT; }
   bool inSelect() const { return state == State::SELECT; }
@@ -43,7 +45,7 @@ public:
   void updateResult(unsigned long now);
 
   // Saver edit handling (rollover 0<->990; increments of 10)
-  bool handleSaverEdit(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver);
+  // Deprecated internal saver edit logic replaced by SaverMenu::EditController.
 
   void animateScroll(unsigned long now);
 
@@ -51,30 +53,24 @@ public:
 
   bool progressFull(unsigned long now) const;
 
-  static constexpr int MENU_COUNT = 10;
-  // Mark MENU_NAMES as inline so no separate definition is required (prevents undefined reference during linking)
-  static inline const char* const MENU_NAMES[MENU_COUNT] = {
-    "Saver","Menu2","Menu3","Menu4","Menu5","Menu6","Menu7","Menu8","Menu9","Help"
-  };
+  // Dynamic menu: currently two items (Saver, Help); can expand later
+  int getMenuCount() const { return 2; }
+  const char* getMenuName(int idx) const { return (idx==0)? SaverMenu::NAME : (idx==1? HelpContent::NAME : ""); }
 
   // Help support
   bool inHelp() const { return state == State::HELP; }
-  int getHelpScroll() const { return helpScroll; }
-  float getHelpScrollPos() const { return helpScrollPos; }
-  int getHelpLines() const { return HELP_LINES_COUNT; }
-  const char* getHelpLine(int i) const { return (i>=0 && i<HELP_LINES_COUNT)? HELP_TEXT[i] : ""; }
-  void enterHelp();
+  int getHelpScroll() const { return helpCtrl.currentStart(); }
+  float getHelpScrollPos() const { return helpCtrl.scrollPos(); }
+  int getHelpLines() const; // now in Help module
+  const char* getHelpLine(int i) const; // forwarded to Help module
+  void enterHelp(); // delegates to help controller
   void processInput(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver); // unified button handling
-  void updateHelpAnimation(unsigned long now);
+  void updateHelpAnimation(unsigned long now); // delegates to help controller
 
 private:
   void enterSelect(unsigned long now);
-  void beginSaverEdit(uint16_t current);
-  void handleHelp(const ButtonState& bs);
-
-  // Auto repeat handler for saver edit
-  void repeatHandler(const ButtonState& bs, unsigned long now);
-  void resetRepeat();
+  void beginSaverEdit(uint16_t current); // uses saver controller
+  void handleHelp(const ButtonState& bs); // uses help controller
 
   State state = State::INACTIVE;
   unsigned long hashHoldStart = 0;
@@ -83,27 +79,10 @@ private:
   unsigned long menuResultStart = 0;
   float menuScrollPos = 0.0f;
   unsigned long lastScrollUpdate = 0;
-  // Saver edit
-  uint16_t editingSaverValue = 0;
-  // repeat
-  bool repeatInited=false; unsigned long holdStart=0; unsigned long lastStep=0; bool actUp=false; bool actDown=false;
-  bool ignoreFirstHashEdgeSaver=false;
+  // Saver controller
+  SaverMenu::EditController saverEdit;
   bool menuHint=false; // show 'M' immediately after hash press
-  // Help
-  int helpScroll=0;
-  float helpScrollPos=0.0f; // animated fractional position
-  int helpScrollTarget=0;
-  unsigned long lastHelpAnimMs=0;
-  static constexpr int HELP_LINES_COUNT = 10;
-  static inline const char* const HELP_TEXT[HELP_LINES_COUNT] = {
-    "Help: up/down",
-    "#/* exit",
-    "# hold: Menu",
-    "# tap: Reset",
-    "UP/DN: Edit",
-    "*: Toggle",
-    "Edit: # next",
-    "*: Cancel edit",
-    "# hold exit",
-    "Saver sets blank"};
+  // Help controller
+  HelpContent::Controller helpCtrl;
+  // Help data moved to HelpContent namespace (MenuItems/Help.*)
 };

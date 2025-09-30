@@ -1,4 +1,5 @@
 #include "MenuSystem.h"
+#include "MenuItems/Help.h"
 
 void MenuSystem::begin() {
     state = State::INACTIVE;
@@ -28,8 +29,9 @@ void MenuSystem::cancel() { state = State::INACTIVE; menuHint=false; }
 
 void MenuSystem::navigate(const ButtonState& bs, unsigned long now) {
     if (state != State::SELECT) return;
-    if (bs.upEdge) { menuIndex = (menuIndex - 1 + MENU_COUNT) % MENU_COUNT; }
-    if (bs.downEdge) { menuIndex = (menuIndex + 1) % MENU_COUNT; }
+    int count = getMenuCount();
+    if (bs.upEdge) { menuIndex = (menuIndex - 1 + count) % count; }
+    if (bs.downEdge) { menuIndex = (menuIndex + 1) % count; }
     animateScroll(now);
 }
 
@@ -38,8 +40,8 @@ bool MenuSystem::handleSelect(const ButtonState& bs, unsigned long now, Config& 
     if (bs.starEdge) { state = State::INACTIVE; return true; }
     if (bs.hashEdge) {
         selectedMenu = menuIndex;
-        if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
-        else if (selectedMenu == 9) { enterHelp(); }
+    if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
+    else if (selectedMenu == 1) { enterHelp(); }
         else { state = State::RESULT; menuResultStart = now; }
         return true;
     }
@@ -52,34 +54,7 @@ void MenuSystem::updateResult(unsigned long now) {
     }
 }
 
-bool MenuSystem::handleSaverEdit(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver) {
-    if (state != State::SAVER_EDIT) return false;
-    ButtonState local = bs;
-    if (ignoreFirstHashEdgeSaver && bs.hashEdge) { local.hashEdge=false; ignoreFirstHashEdgeSaver=false; }
-    repeatHandler(local, now);
-    bool changed = false;
-    if (actUp) {
-        if (editingSaverValue == 0) editingSaverValue = 10;
-        else if (editingSaverValue == 990) editingSaverValue = 0;
-        else editingSaverValue += 10;
-        changed = true;
-    }
-    if (actDown) {
-        if (editingSaverValue == 0) editingSaverValue = 990;
-        else if (editingSaverValue == 10) editingSaverValue = 0;
-        else editingSaverValue -= 10;
-        changed = true;
-    }
-    if (changed) saver.noteActivity(now);
-    if (local.starEdge) {
-        state = State::SELECT; resetRepeat(); return true; }
-    if (local.hashEdge) {
-        config.saveScreensaverIfChanged(editingSaverValue);
-        saver.configure(config.get().screensaverDelaySec = editingSaverValue);
-        saver.noteActivity(now);
-        state = State::SELECT; resetRepeat(); return true; }
-    return true;
-}
+// old handleSaverEdit removed (delegated)
 
 void MenuSystem::animateScroll(unsigned long now) {
     unsigned long dtMs = now - lastScrollUpdate;
@@ -88,11 +63,11 @@ void MenuSystem::animateScroll(unsigned long now) {
     float dt = dtMs / 1000.0f;
     float target = (float)menuIndex;
     float diff = target - menuScrollPos;
-    if (diff > (MENU_COUNT / 2)) diff -= MENU_COUNT; else if (diff < -(MENU_COUNT / 2)) diff += MENU_COUNT;
+    // no wrap-around with dynamic small count; simple easing
     float step = Defaults::MENU_SCROLL_SPEED * dt;
     if (fabs(diff) <= step) menuScrollPos = target; else {
-        menuScrollPos += (diff > 0 ? step : -step);
-        if (menuScrollPos < 0) menuScrollPos += MENU_COUNT; if (menuScrollPos >= MENU_COUNT) menuScrollPos -= MENU_COUNT;
+    menuScrollPos += (diff > 0 ? step : -step);
+    if (menuScrollPos < 0) menuScrollPos = 0; int maxIndex = getMenuCount()-1; if (menuScrollPos > maxIndex) menuScrollPos = (float)maxIndex;
     }
 }
 
@@ -118,68 +93,24 @@ void MenuSystem::enterSelect(unsigned long now) {
 }
 
 void MenuSystem::beginSaverEdit(uint16_t current) {
-    editingSaverValue = current - (current % 10);
+    saverEdit.begin(current);
     state = State::SAVER_EDIT;
-    resetRepeat();
-    ignoreFirstHashEdgeSaver = true;
 }
 
-void MenuSystem::repeatHandler(const ButtonState& bs, unsigned long now) {
-    if (!repeatInited) { repeatInited=true; holdStart=0; }
-    actUp = bs.upEdge; actDown = bs.downEdge;
-    bool heldAny = bs.up || bs.down;
-    if (heldAny) {
-        if (holdStart==0) { holdStart=now; lastStep=now; }
-        unsigned long held = now - holdStart;
-        if (held > Defaults::EDIT_INITIAL_DELAY_MS) {
-            if (now - lastStep >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
-                if (bs.up) actUp = true; if (bs.down) actDown = true; lastStep = now;
-            } else { actUp = actDown = false; }
-        } else {
-            if (!bs.upEdge) actUp=false; if (!bs.downEdge) actDown=false;
-        }
-    } else {
-        holdStart=0;
-    }
-}
-
-void MenuSystem::resetRepeat() { holdStart=0; lastStep=0; repeatInited=false; actUp=actDown=false; }
+// repeat logic now resides in SaverMenu::EditController
 
 void MenuSystem::enterHelp() {
-    state = State::HELP;
-    helpScroll = 0;
-    helpScrollPos = 0.0f;
-    helpScrollTarget = 0;
-    lastHelpAnimMs = millis();
-    menuHint = false;
-    if (Serial) Serial.println(F("Entering HELP"));
+    state = State::HELP; menuHint=false; helpCtrl.enter();
 }
 
 void MenuSystem::handleHelp(const ButtonState& bs) {
-    if (state != State::HELP) return;
-    if (bs.upEdge) { if (helpScrollTarget>0) helpScrollTarget--; }
-    if (bs.downEdge) { if (helpScrollTarget < HELP_LINES_COUNT-4) helpScrollTarget++; }
-    if (bs.hashEdge || bs.starEdge) { state = State::SELECT; if (Serial) Serial.println(F("Exit HELP")); }
+    if (state != State::HELP) return; if (helpCtrl.handleInput(bs)) { state = State::SELECT; }
 }
 
-void MenuSystem::updateHelpAnimation(unsigned long now) {
-    if (state != State::HELP) return;
-    unsigned long dt = now - lastHelpAnimMs;
-    if (dt == 0) return;
-    lastHelpAnimMs = now;
-    // simple smooth approach: move at fixed speed lines/sec toward target
-    const float speed = 8.0f; // lines per second
-    float diff = (float)helpScrollTarget - helpScrollPos;
-    float step = speed * (dt / 1000.0f);
-    if (fabs(diff) <= step) {
-        helpScrollPos = (float)helpScrollTarget;
-        helpScroll = helpScrollTarget;
-    } else {
-        helpScrollPos += (diff > 0 ? step : -step);
-        // update integer anchor
-        helpScroll = (int)floor(helpScrollPos + 0.001f);
-    }
-}
+void MenuSystem::updateHelpAnimation(unsigned long now) { if (state==State::HELP) helpCtrl.update(now); }
+
+int MenuSystem::getHelpLines() const { return HelpContent::LINES_COUNT; }
+const char* MenuSystem::getHelpLine(int i) const { return HelpContent::line(i); }
 
 void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver) {
         switch(state) {
@@ -188,14 +119,14 @@ void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& 
                 if (bs.hashEdge) {
                     selectedMenu = menuIndex;
                     if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
-                    else if (selectedMenu == 9) { enterHelp(); }
+                    else if (selectedMenu == 1) { enterHelp(); }
                     else { state = State::RESULT; menuResultStart = now; }
                 } else if (bs.starEdge) {
                     state = State::INACTIVE;
                 }
                 break;
             case State::SAVER_EDIT:
-                handleSaverEdit(bs, now, config, saver); // already consumes
+                if (saverEdit.handle(bs, now, config, saver)) { state = State::SELECT; }
                 break;
             case State::HELP:
                 handleHelp(bs);

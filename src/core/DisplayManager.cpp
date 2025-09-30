@@ -24,6 +24,20 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
         } else if (!timerCtl.inEdit() && (menu.getState()==MenuSystem::State::PROGRESS || menu.getState()==MenuSystem::State::SELECT || menu.getState()==MenuSystem::State::RESULT || menu.showMenuHint())) {
             display.setTextSize(2); display.setCursor(0,0); display.setTextColor(WHITE,BLACK); display.print('M');
         }
+
+        // Draw bottom 1px progress bar during normal run (only when base screen visible and not editing)
+        if (!timerCtl.inEdit() && menu.getState()==MenuSystem::State::INACTIVE) {
+            // Determine phase length (on or off) in tenths; currentTimerTenths is tenths elapsed in current phase
+            uint32_t phaseLen = relayOn ? config.get().onTime : config.get().offTime; // both stored in tenths
+            if (phaseLen == 0) phaseLen = 1; // avoid div by zero
+            float frac = (float)currentTimerTenths / (float)phaseLen;
+            if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+            int filled = (int)(frac * 128.0f + 0.5f);
+            if (filled>128) filled=128; if (filled<0) filled=0;
+            // Clear bottom row then draw filled segment
+            display.fillRect(0,63,128,1,BLACK);
+            if (filled>0) display.fillRect(0,63,filled,1,WHITE);
+        }
     }
     switch(menu.getState()) {
       case MenuSystem::State::INACTIVE: break;

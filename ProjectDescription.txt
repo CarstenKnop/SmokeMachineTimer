@@ -10,11 +10,11 @@ Connections:
    GPIO7 / SCL / D5 => SCL Display
 Features:
    On/Off timer (0000.1...9999.9 sec) timer. Both On and Off times shall be seatable.
-   Up or Down button shall enabled editing of the times.
-   In editing mode the digit getting edited the have inverted text/background.
+   Up or Down button shall enabled editing of the times. When hold down the digits shall increase/decrease.
+   In editing mode the digit getting edited the have blinking inverted text/background.
    In edit mode, 1 digit at a time, shall be edited. When the 6 first Off time digits are edited, then it shall edit the next 6 On time digits.
    The # button shall be used to select next digit. When all is done it shall exit edit mode.
    When not in edit mode it is in run mode and the on/off timer is running, which shall be displayed on the display.
-   When pressing the * button the output shall be enabled for as long as it is pressed.
+   When pressing the * button the output shall be toggled on/off and the timer shall shift from start of On or Off.
    The last edited on/off timer values shall be saved in EEPROM.
    When pressing the # button in run mode, the timer shall be reset (Relay output is off and the timer 0).

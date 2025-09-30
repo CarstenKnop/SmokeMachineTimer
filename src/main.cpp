@@ -89,6 +89,23 @@ bool relayState = false;
 bool editMode = false;
 uint8_t editDigit = 0; // 0-5: Off, 6-11: On
 
+// Persistence throttle
+static bool timersDirty = false;            // true when values changed in edit mode
+static unsigned long lastEditChange = 0;    // millis timestamp of last digit modification
+const unsigned long SAVE_DELAY_MS = 2000;   // wait this long after last change before saving
+
+void markTimersDirty() {
+  timersDirty = true;
+  lastEditChange = millis();
+}
+
+void maybeSaveTimers(bool force = false) {
+  if (!timersDirty && !force) return;
+  if (!force && (millis() - lastEditChange) < SAVE_DELAY_MS) return;
+  saveTimers();
+  timersDirty = false;
+}
+
 // Button state
 bool lastUp = false, lastDown = false, lastHash = false, lastStar = false;
 
@@ -183,12 +200,12 @@ void loop() {
     if (requireRelease) {
       // Wait for both up and down to be released before allowing changes
       if (!up && !down) requireRelease = false;
-  actUp = false;
-  actDown = false;
+      actUp = false;
+      actDown = false;
     } else {
       if ((upHeld || downHeld) && now - lastUpDown > 180) {
-  if (upHeld) actUp = true;
-  if (downHeld) actDown = true;
+        if (upHeld) actUp = true;
+        if (downHeld) actDown = true;
         lastUpDown = now;
       }
     }
@@ -206,33 +223,29 @@ void loop() {
       digits[i] = temp % 10;
       temp /= 10;
     }
-  if (actUp) {
-      digits[digit] = (digits[digit] + 1) % 10;
-    }
-  if (actDown) {
-      digits[digit] = (digits[digit] + 9) % 10;
-    }
+    if (actUp) { digits[digit] = (digits[digit] + 1) % 10; markTimersDirty(); }
+    if (actDown) { digits[digit] = (digits[digit] + 9) % 10; markTimersDirty(); }
     // Reconstruct value
     uint32_t newVal = 0;
     for (int i = 0; i < DIGITS; ++i) {
       newVal = newVal * 10 + digits[i];
     }
-    if (newVal < TIMER_MIN) newVal = TIMER_MIN;
-    if (newVal > TIMER_MAX) newVal = TIMER_MAX;
-    *editVal = newVal * 10;
+  if (newVal < TIMER_MIN) newVal = TIMER_MIN;
+  if (newVal > TIMER_MAX) newVal = TIMER_MAX;
+  if (*editVal != newVal * 10) { *editVal = newVal * 10; markTimersDirty(); }
     // # short press advances digit; 2s hold exits edit mode
     if (hashEdge) {
       editDigit++;
       if (editDigit >= DIGITS * 2) {
         editMode = false;
-        saveTimers();
+        maybeSaveTimers(true); // force save at end of edit sequence
       }
       requireRelease = true;
     } else if (hash && !hashWasHeld && hashHoldStart && (millis() - hashHoldStart >= 2000)) {
       // Long hold exit
       hashWasHeld = true;
       editMode = false;
-      saveTimers();
+      maybeSaveTimers(true); // force save on long-hold exit
       requireRelease = true;
     }
   } else {
@@ -268,6 +281,11 @@ void loop() {
       editDigit = 0;
       requireRelease = true;
     }
+  }
+
+  // Periodic deferred save outside edit mode
+  if (!editMode) {
+    maybeSaveTimers(false);
   }
   digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);
 

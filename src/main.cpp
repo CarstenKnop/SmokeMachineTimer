@@ -107,8 +107,8 @@ static int menuIndex = 0; // 0-9
 static int selectedMenu = -1;
 static unsigned long menuResultStart = 0;
 const int MENU_COUNT = 10;
-const unsigned long MENU_PROGRESS_START_MS = 1000; // show bar after 1s
-const unsigned long MENU_PROGRESS_FULL_MS  = 5000; // full at 5s
+const unsigned long MENU_PROGRESS_START_MS = 500; // show bar after 0.5s
+const unsigned long MENU_PROGRESS_FULL_MS  = 3000; // full at 3s
 // Smooth scrolling variables for menu
 static float menuScrollPos = 0.0f; // animated index position
 static unsigned long lastScrollUpdate = 0;

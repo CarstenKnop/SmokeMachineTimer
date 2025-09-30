@@ -38,6 +38,18 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
             display.fillRect(0,63,128,1,BLACK);
             if (filled>0) display.fillRect(0,63,filled,1,WHITE);
         }
+
+        // Transient clamp indicator (flash 'MIN' for ~1s after clamping zeros)
+        if (timerCtl.recentlyClamped(millis())) {
+            display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+            // Place near top-right but avoid overwriting menu hint / dirty flags; use bottom-left small box above progress bar
+            int y = 54; int w=24; int h=8; int x=0;
+            display.fillRect(x,y,w,h,WHITE);
+            display.setTextColor(BLACK,WHITE);
+            display.setCursor(x+2,y);
+            display.print("MIN");
+            display.setTextColor(WHITE,BLACK); // restore default
+        }
     }
     switch(menu.getState()) {
       case MenuSystem::State::INACTIVE: break;

@@ -25,6 +25,8 @@ public:
 
   uint8_t getEditDigit() const { return editDigit; }
   bool wasCancelled() const { return cancelled; }
+  bool recentlyClamped(unsigned long now, unsigned long windowMs=1000UL) const { return clampEventMs!=0 && (now - clampEventMs) < windowMs; }
+  bool didClampLastExit() const { return clampDidApply; }
 
 private:
   void loadDigits();
@@ -37,4 +39,5 @@ private:
   Config::Values* cfg=nullptr; bool cancelled=false; uint32_t snapshotOff=0; uint32_t snapshotOn=0;
   bool relayState=false; uint32_t timer=0; AppState state=AppState::RUN; uint8_t editDigit=0; bool digitsInit=false; uint8_t offDigits[Defaults::DIGITS]; uint8_t onDigits[Defaults::DIGITS];
   unsigned long lastTickMs=0;
+  unsigned long clampEventMs=0; bool clampDidApply=false;
 };

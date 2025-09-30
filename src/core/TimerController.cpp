@@ -61,7 +61,8 @@ bool TimerController::handleEdit(const ButtonState& bs, unsigned long now, bool&
     if (actDown){ digits[digit] = (digits[digit]+9)%10; changed=true; }
     if (changed) {
         uint32_t newVal=0; for(int i=0;i<Defaults::DIGITS;++i) newVal = newVal*10 + digits[i];
-        if (newVal < Defaults::TIMER_MIN || newVal > Defaults::TIMER_MAX) { digits[digit]=orig; }
+        // Allow zero temporarily (user can see 0000.0), only reject above max.
+        if (newVal > Defaults::TIMER_MAX) { digits[digit]=orig; }
         else {
             uint32_t* target = (editDigit < Defaults::DIGITS)? &cfg->offTime : &cfg->onTime;
             if (*target != newVal) { *target = newVal; valuesChanged=true; timersDirty=true; }
@@ -73,6 +74,14 @@ bool TimerController::handleEdit(const ButtonState& bs, unsigned long now, bool&
         exitEdit(false); exited=true; firstCycle=true; return true;
     }
     if (bs.hashEdge) {
+        // Clamp current working values before advancing
+        bool clampedNow=false;
+        if (cfg->offTime < Defaults::TIMER_MIN) { cfg->offTime = Defaults::TIMER_MIN; clampedNow=true; }
+        if (cfg->onTime  < Defaults::TIMER_MIN) { cfg->onTime  = Defaults::TIMER_MIN; clampedNow=true; }
+        if (clampedNow) {
+            // reload digit buffers so UI immediately reflects clamped value
+            digitsInit=false; loadDigits();
+        }
         editDigit++; if (editDigit >= Defaults::DIGITS*2) { exitEdit(valuesChanged); exited=true; firstCycle=true; }
         else requireRelease=true;
     }
@@ -90,4 +99,14 @@ void TimerController::loadDigits() {
     digitsInit=true;
 }
 
-void TimerController::exitEdit(bool changed) { state = AppState::RUN; digitsInit=false; if (changed && !cancelled) timersDirty=true; }
+void TimerController::exitEdit(bool changed) {
+    state = AppState::RUN; digitsInit=false;
+    if (changed && !cancelled) {
+        // Clamp any zero values to minimum allowed (TIMER_MIN)
+        clampDidApply = false;
+        if (cfg->offTime == 0) { cfg->offTime = Defaults::TIMER_MIN; clampDidApply = true; }
+        if (cfg->onTime == 0)  { cfg->onTime  = Defaults::TIMER_MIN; clampDidApply = true; }
+        if (clampDidApply) { clampEventMs = millis(); }
+        timersDirty=true;
+    }
+}

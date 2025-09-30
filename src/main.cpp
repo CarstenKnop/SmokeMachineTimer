@@ -83,6 +83,12 @@ void printTimerValue(uint32_t value, int y, const char* label, int editDigit = 2
 
 // Timer settings
 #define EEPROM_ADDR 0
+// Layout:
+// [0..3]  offTime (uint32_t)
+// [4..7]  onTime  (uint32_t)
+// [8..9]  screensaverDelaySec (uint16_t)
+// (expand later if needed)
+#define EEPROM_ADDR_SAVER (EEPROM_ADDR + sizeof(offTime) + sizeof(onTime))
 
 // Stored in tenths of a second (value 100 = 10.0s)
 uint32_t offTime = 100; // default 10.0s
@@ -90,7 +96,7 @@ uint32_t onTime  = 100; // default 10.0s
 uint32_t timer = 0;
 bool relayState = false;
 // Application states
-enum class AppState : uint8_t { RUN, EDIT, MENU_PROGRESS, MENU_SELECT, MENU_RESULT };
+enum class AppState : uint8_t { RUN, EDIT, MENU_PROGRESS, MENU_SELECT, MENU_RESULT, MENU_SAVER_EDIT };
 AppState appState = AppState::RUN;
 uint8_t editDigit = 0; // 0-4: Off digits, 5-9: On digits (fractional at index 4 & 9)
 
@@ -114,6 +120,27 @@ static float menuScrollPos = 0.0f; // animated index position
 static unsigned long lastScrollUpdate = 0;
 const float MENU_SCROLL_SPEED = 5.0f; // units per second toward target
 
+// Screensaver settings
+static uint16_t screensaverDelaySec = 0; // 0 = OFF
+static unsigned long lastUserActivity = 0; // millis of last button edge (wakes if blanked)
+static bool displayBlanked = false;
+static bool wakeConsume = false; // first press after wake is consumed
+// Absolute target time (millis) when we should blank; 0 means disabled
+static unsigned long nextBlankAt = 0;
+
+// Screensaver edit digits (3 digits 000-999)
+static uint8_t saverDigits[3];
+static uint8_t saverEditIndex = 0;
+static bool saverDigitsInit = false;
+static uint16_t editingSaverValue = 0; // working value in seconds (multiple of 10)
+static bool saverEditSessionInit = false;
+
+// Menu item names (index 0 customized)
+static const char* menuNames[MENU_COUNT] = {
+  "Saver", "Menu2", "Menu3", "Menu4", "Menu5",
+  "Menu6", "Menu7", "Menu8", "Menu9", "Menu10"
+};
+
 // Persistent digit buffers for edit mode
 static uint8_t offDigits[DIGITS];
 static uint8_t onDigits[DIGITS];
@@ -121,6 +148,7 @@ static bool editDigitsInitialized = false;
 
 // Persistence throttle
 static bool timersDirty = false;            // true when values changed in edit mode
+static uint16_t lastSavedSaverDelay = 0xFFFF; // sentinel
 
 // Forward declarations for persistence helpers
 void saveTimers();
@@ -146,21 +174,57 @@ void exitEditMode(bool forceSave) {
   }
 }
 
+// Enter screensaver config
+void enterScreensaverEdit() {
+  appState = AppState::MENU_SAVER_EDIT;
+  saverEditIndex = 0; // unused now
+  saverDigitsInit = false; // legacy
+  saverEditSessionInit = false;
+}
+
+void finalizeScreensaverEdit() {
+  // Assign from editing value (already multiple of 10 or 0)
+  screensaverDelaySec = editingSaverValue;
+  // Return to menu select instead of run so user can configure more items
+  appState = AppState::MENU_SELECT;
+  menuIndex = 0; // keep focus on first menu (screensaver)
+  menuScrollPos = (float)menuIndex;
+  lastScrollUpdate = millis();
+  // Reset inactivity timer
+  lastUserActivity = millis();
+  // Recompute next blank target after changing delay
+  if (screensaverDelaySec > 0) {
+    nextBlankAt = lastUserActivity + (unsigned long)screensaverDelaySec * 1000UL;
+  } else {
+    nextBlankAt = 0;
+  }
+  // Persist only if changed
+  if (screensaverDelaySec != lastSavedSaverDelay) {
+    EEPROM.put(EEPROM_ADDR_SAVER, screensaverDelaySec);
+    EEPROM.commit();
+    lastSavedSaverDelay = screensaverDelaySec;
+  }
+}
+
 // Button state
 bool lastUp = false, lastDown = false, lastHash = false, lastStar = false;
 
 void saveTimers() {
   EEPROM.put(EEPROM_ADDR, offTime);
   EEPROM.put(EEPROM_ADDR + sizeof(offTime), onTime);
+  // Do not commit screensaver here (separate conditional save)
   EEPROM.commit();
 }
 
 void loadTimers() {
   EEPROM.get(EEPROM_ADDR, offTime);
   EEPROM.get(EEPROM_ADDR + sizeof(offTime), onTime);
+  EEPROM.get(EEPROM_ADDR_SAVER, screensaverDelaySec);
   // Validate (values already stored as tenths)
   if (offTime < TIMER_MIN || offTime > TIMER_MAX) offTime = 100; // 10.0s fallback
   if (onTime  < TIMER_MIN || onTime  > TIMER_MAX) onTime  = 100; // 10.0s fallback
+  if (screensaverDelaySec > 999) screensaverDelaySec = 0; // clamp
+  lastSavedSaverDelay = screensaverDelaySec;
 }
 
 void setup() {
@@ -192,6 +256,7 @@ void setup() {
   delay(1000);
   display.clearDisplay();
   display.display();
+  lastUserActivity = millis(); // initialize inactivity baseline
 }
 
 // Edit state handler extracted from loop for clarity
@@ -285,6 +350,10 @@ void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool
   }
 
   // Advance / exit logic
+  if (star && !hash) { // * exits edit immediately, save changes
+    exitEditMode(true);
+    return;
+  }
   if (hashEdge) {
     editDigit++;
     if (editDigit >= DIGITS * 2) {
@@ -300,13 +369,82 @@ void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool
   }
 }
 
+// Handle screensaver delay edit (similar to timer digit editing but 3 digits only)
+void handleSaverEdit(bool up, bool down, bool hash, bool star, bool upEdge, bool downEdge, bool hashEdge, unsigned long now) {
+  if (!saverEditSessionInit) {
+    editingSaverValue = screensaverDelaySec - (screensaverDelaySec % 10); // normalize
+    saverEditSessionInit = true;
+  }
+  static unsigned long holdStart = 0;
+  static unsigned long lastStep = 0;
+  const unsigned long INITIAL_DELAY = 400;  // ms before repeat
+  const unsigned long REPEAT_INTERVAL = 120; // ms per repeat
+  bool upHeld = up;
+  bool downHeld = down;
+  bool actUp = upEdge;
+  bool actDown = downEdge;
+
+  if (upHeld || downHeld) {
+    if (holdStart == 0) { holdStart = now; lastStep = now; }
+    unsigned long heldFor = now - holdStart;
+    if (heldFor > INITIAL_DELAY) {
+      if (now - lastStep >= REPEAT_INTERVAL) {
+        if (upHeld) actUp = true;
+        if (downHeld) actDown = true;
+        lastStep = now;
+      } else {
+        actUp = actDown = false;
+      }
+    } else {
+      // Pre-delay: only initial edges allowed
+      if (!upEdge) actUp = false;
+      if (!downEdge) actDown = false;
+    }
+  } else {
+    holdStart = 0;
+  }
+
+  bool changed = false;
+  if (actUp) {
+    if (editingSaverValue == 0) {
+      editingSaverValue = 10; // first step from OFF goes to 10s
+    } else if (editingSaverValue == 990) {
+      editingSaverValue = 0; // rollover top -> OFF
+    } else {
+      editingSaverValue += 10; // normal increment
+    }
+    changed = true;
+  }
+  if (actDown) {
+    if (editingSaverValue == 0) {
+      editingSaverValue = 990; // rollover OFF -> top
+    } else if (editingSaverValue == 10) {
+      editingSaverValue = 0; // single step down to OFF
+    } else {
+      editingSaverValue -= 10; // normal decrement
+    }
+    changed = true;
+  }
+  if (changed) {
+    lastUserActivity = now;
+    if (screensaverDelaySec > 0) {
+      // Keep existing schedule for current active delay; editing itself shouldn't alter blank deadline
+      // (We only reschedule on actual user input or final save)
+      nextBlankAt = lastUserActivity + (unsigned long)screensaverDelaySec * 1000UL;
+    }
+  }
+  if (hashEdge) {
+    finalizeScreensaverEdit();
+  }
+}
+
 void render(bool blinkState, uint8_t editDigit, bool inEdit) {
   display.clearDisplay();
   display.setTextSize(2);
   AppState state = appState;
 
   // Hide timers entirely during menu selection/result full-screen modes
-  bool showTimers = !(state == AppState::MENU_SELECT || state == AppState::MENU_RESULT);
+  bool showTimers = !(state == AppState::MENU_SELECT || state == AppState::MENU_RESULT || state == AppState::MENU_SAVER_EDIT);
 
   if (showTimers) {
     if (inEdit && timersDirty) {
@@ -390,15 +528,16 @@ void render(bool blinkState, uint8_t editDigit, bool inEdit) {
         int yi = (int) y;
         // Determine if this is the selected (nearest) item
         bool isSelected = fabs(logicalRow) < 0.5f; // close to center
+        const char* name = menuNames[idx];
         if (isSelected) {
           display.fillRect(0, yi, 128, 20, WHITE);
           display.setTextColor(BLACK, WHITE);
           display.setCursor(0, yi);
-          display.print("> M"); display.print(idx + 1);
+          display.print("> "); display.print(name);
         } else {
           display.setTextColor(WHITE, BLACK);
           display.setCursor(0, yi);
-          display.print("  M"); display.print(idx + 1);
+          display.print("  "); display.print(name);
         }
       }
       break; }
@@ -411,6 +550,54 @@ void render(bool blinkState, uint8_t editDigit, bool inEdit) {
       display.print("Menu ");
       display.print(selectedMenu + 1);
       // Leave third line blank or could show countdown
+      break; }
+    case AppState::MENU_SAVER_EDIT: {
+      // Reuse timer digit style (similar spacing) for 3-digit seconds value
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setCursor(0,0);
+      display.print("Saver Delay s");
+      display.setTextSize(2);
+      int startX = 10;
+      uint16_t val = editingSaverValue;
+      if (val == 0) {
+        // OFF display
+        int boxW = 60; int boxH = 18;
+        if (blinkState) {
+          display.fillRect(startX,24,boxW,boxH,WHITE);
+          display.setTextColor(BLACK,WHITE);
+        } else {
+          display.fillRect(startX,24,boxW,boxH,BLACK);
+          display.setTextColor(WHITE,BLACK);
+        }
+        display.setCursor(startX+2,24);
+        display.print("OFF");
+      } else {
+        char buf[6];
+        snprintf(buf,sizeof(buf),"%u", val);
+        int len = strlen(buf);
+        int digitWidth = 11;
+        int boxW = len * digitWidth + 6;
+        if (blinkState) {
+          display.fillRect(startX,24,boxW,18,WHITE);
+          display.setTextColor(BLACK,WHITE);
+        } else {
+          display.fillRect(startX,24,boxW,18,BLACK);
+          display.setTextColor(WHITE,BLACK);
+        }
+        display.setCursor(startX+2,24);
+        display.print(buf);
+        display.setTextColor(WHITE,BLACK);
+        display.setCursor(startX + boxW + 2,24);
+        display.print('s');
+      }
+      // OFF indicator
+      display.setTextSize(1);
+      display.setTextColor(WHITE,BLACK);
+      display.setCursor(50,46);
+      if (val == 0) display.print("OFF"); else { display.print("    "); }
+      display.setCursor(0,56);
+      display.print("#=Save *=Cancel");
       break; }
   }
   display.display();
@@ -445,9 +632,51 @@ void loop() {
   unsigned long now = millis();
 
   // Blinking for edit digit
-  if (appState == AppState::EDIT && now - lastBlink > 350) {
+  if ((appState == AppState::EDIT || appState == AppState::MENU_SAVER_EDIT) && now - lastBlink > 350) {
     blinkState = !blinkState;
     lastBlink = now;
+  }
+
+  // Track user activity on any button activity (press or hold) while display on
+  if (!displayBlanked && (up || down || hash || star)) {
+    lastUserActivity = now;
+    if (screensaverDelaySec > 0) {
+      nextBlankAt = lastUserActivity + (unsigned long)screensaverDelaySec * 1000UL;
+    }
+  }
+
+  // Screensaver blanking logic
+  if (!displayBlanked && nextBlankAt != 0 && (long)(now - nextBlankAt) >= 0) {
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    displayBlanked = true;
+  }
+  if (displayBlanked) {
+    if (up || down || hash || star) {
+      // Wake on any press
+      display.ssd1306_command(SSD1306_DISPLAYON);
+      displayBlanked = false;
+      wakeConsume = true;
+      lastUserActivity = now;
+      if (screensaverDelaySec > 0) {
+        nextBlankAt = lastUserActivity + (unsigned long)screensaverDelaySec * 1000UL;
+      }
+      // Consume this frame's edges
+      upEdge = downEdge = hashEdge = starEdge = false;
+    } else {
+      // While blanked and no wake yet, do nothing further
+      delay(10);
+      return;
+    }
+  } else if (wakeConsume) {
+    // Wait for all keys released before resuming normal processing
+    if (!up && !down && !hash && !star) {
+      wakeConsume = false;
+    } else {
+      // Consume inputs until release
+      upEdge = downEdge = hashEdge = starEdge = false;
+      delay(10);
+      return;
+    }
   }
 
   if (appState == AppState::EDIT) {
@@ -494,10 +723,17 @@ void loop() {
     // Navigate menu
     if (upEdge) { menuIndex = (menuIndex - 1 + MENU_COUNT) % MENU_COUNT; }
     if (downEdge) { menuIndex = (menuIndex + 1) % MENU_COUNT; }
-    if (hashEdge) {
+    if (starEdge) { // * exits menu back to RUN
+      appState = AppState::RUN;
+      lastUserActivity = now;
+    } else if (hashEdge) {
       selectedMenu = menuIndex;
-      appState = AppState::MENU_RESULT;
-      menuResultStart = now;
+      if (selectedMenu == 0) { // Menu 1: screensaver config
+        enterScreensaverEdit();
+      } else {
+        appState = AppState::MENU_RESULT;
+        menuResultStart = now;
+      }
     }
     // Animate scroll position toward menuIndex
     unsigned long dtMs = now - lastScrollUpdate;
@@ -522,6 +758,18 @@ void loop() {
   } else if (appState == AppState::MENU_RESULT) {
     if (now - menuResultStart >= 5000) {
       appState = AppState::RUN;
+    }
+  } else if (appState == AppState::MENU_SAVER_EDIT) {
+    if (starEdge) { // cancel edit -> back to menu select without saving changes
+      // Re-load current persisted value digits if user returns later
+      saverDigitsInit = false;
+      appState = AppState::MENU_SELECT;
+      lastUserActivity = now;
+      if (screensaverDelaySec > 0) {
+        nextBlankAt = lastUserActivity + (unsigned long)screensaverDelaySec * 1000UL;
+      }
+    } else {
+      handleSaverEdit(up, down, hash, star, upEdge, downEdge, hashEdge, now);
     }
   }
 

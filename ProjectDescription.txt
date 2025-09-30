@@ -1,0 +1,20 @@
+Can you create me a new PlatformIO project (Arduino) for the Seed XIAO ESP32-C3. It has a I2C SSD1315 0.96" OLED 12864 with 4 buttons display (128x64). 
+The project is called: SmokeMachineTimer
+Connections:
+   GPIO2 / D0 => Relay Output
+   GPIO3 / D1 => Up button
+   GPIO4 / D2 => Down button
+   GPIO9 / D9 => # button
+   GPIO10 / D10 => * button
+   GPIO6 / SDA / D4 => SDA Display
+   GPIO7 / SCL / D5 => SCL Display
+Features:
+   On/Off timer (0000.1...9999.9 sec) timer. Both On and Off times shall be seatable.
+   Up or Down button shall enabled editing of the times.
+   In editing mode the digit getting edited the have inverted text/background.
+   In edit mode, 1 digit at a time, shall be edited. When the 6 first Off time digits are edited, then it shall edit the next 6 On time digits.
+   The # button shall be used to select next digit. When all is done it shall exit edit mode.
+   When not in edit mode it is in run mode and the on/off timer is running, which shall be displayed on the display.
+   When pressing the * button the output shall be enabled for as long as it is pressed.
+   The last edited on/off timer values shall be saved in EEPROM.
+   When pressing the # button in run mode, the timer shall be reset (Relay output is off and the timer 0).

@@ -39,6 +39,7 @@ bool MenuSystem::handleSelect(const ButtonState& bs, unsigned long now, Config& 
     if (bs.hashEdge) {
         selectedMenu = menuIndex;
         if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
+        else if (selectedMenu == 9) { enterHelp(); }
         else { state = State::RESULT; menuResultStart = now; }
         return true;
     }
@@ -143,3 +144,68 @@ void MenuSystem::repeatHandler(const ButtonState& bs, unsigned long now) {
 }
 
 void MenuSystem::resetRepeat() { holdStart=0; lastStep=0; repeatInited=false; actUp=actDown=false; }
+
+void MenuSystem::enterHelp() {
+    state = State::HELP;
+    helpScroll = 0;
+    helpScrollPos = 0.0f;
+    helpScrollTarget = 0;
+    lastHelpAnimMs = millis();
+    menuHint = false;
+    if (Serial) Serial.println(F("Entering HELP"));
+}
+
+void MenuSystem::handleHelp(const ButtonState& bs) {
+    if (state != State::HELP) return;
+    if (bs.upEdge) { if (helpScrollTarget>0) helpScrollTarget--; }
+    if (bs.downEdge) { if (helpScrollTarget < HELP_LINES_COUNT-4) helpScrollTarget++; }
+    if (bs.hashEdge || bs.starEdge) { state = State::SELECT; if (Serial) Serial.println(F("Exit HELP")); }
+}
+
+void MenuSystem::updateHelpAnimation(unsigned long now) {
+    if (state != State::HELP) return;
+    unsigned long dt = now - lastHelpAnimMs;
+    if (dt == 0) return;
+    lastHelpAnimMs = now;
+    // simple smooth approach: move at fixed speed lines/sec toward target
+    const float speed = 8.0f; // lines per second
+    float diff = (float)helpScrollTarget - helpScrollPos;
+    float step = speed * (dt / 1000.0f);
+    if (fabs(diff) <= step) {
+        helpScrollPos = (float)helpScrollTarget;
+        helpScroll = helpScrollTarget;
+    } else {
+        helpScrollPos += (diff > 0 ? step : -step);
+        // update integer anchor
+        helpScroll = (int)floor(helpScrollPos + 0.001f);
+    }
+}
+
+void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver) {
+        switch(state) {
+            case State::SELECT:
+                // navigation handled separately via navigate(); selection via hashEdge
+                if (bs.hashEdge) {
+                    selectedMenu = menuIndex;
+                    if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
+                    else if (selectedMenu == 9) { enterHelp(); }
+                    else { state = State::RESULT; menuResultStart = now; }
+                } else if (bs.starEdge) {
+                    state = State::INACTIVE;
+                }
+                break;
+            case State::SAVER_EDIT:
+                handleSaverEdit(bs, now, config, saver); // already consumes
+                break;
+            case State::HELP:
+                handleHelp(bs);
+                break;
+            case State::RESULT:
+                if (bs.hashEdge || bs.starEdge) { state = State::INACTIVE; }
+                break;
+            case State::PROGRESS:
+            case State::INACTIVE:
+                // handled externally (progress logic)
+                break;
+        }
+}

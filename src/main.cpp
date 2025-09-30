@@ -103,9 +103,10 @@ void loop() {
   }
 
   // Menu logic
-  if (menu.inSelect()) { menu.navigate(bs, now); menu.handleSelect(bs, now, config); }
+  if (menu.inSelect()) { menu.navigate(bs, now); }
+  menu.processInput(bs, now, config, screensaver);
+  if (menu.inHelp()) { menu.updateHelpAnimation(now); }
   menu.updateResult(now);
-  if (menu.inSaverEdit()) { menu.handleSaverEdit(bs, now, config, screensaver); }
 
   // Timing + relay
   // Pause run timing while in progress hold (after threshold) so cycle freezes

@@ -31,6 +31,7 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
       case MenuSystem::State::SELECT: drawMenu(menu); break;
       case MenuSystem::State::RESULT: drawResult(menu); break;
       case MenuSystem::State::SAVER_EDIT: drawSaverEdit(menu, blinkState); break;
+            case MenuSystem::State::HELP: drawHelp(menu); break;
     }
     display.display();
 }
@@ -78,4 +79,36 @@ void DisplayManager::drawSaverEdit(const MenuSystem& menu, bool blinkState) {
     display.clearDisplay(); display.setTextSize(1); display.setCursor(0,0); display.print("Saver Delay s"); display.setTextSize(2); int startX=10; uint16_t val=menu.getEditingSaverValue(); if (val==0) {int boxW=60;int boxH=18; if (blinkState) { display.fillRect(startX,24,boxW,boxH,WHITE); display.setTextColor(BLACK,WHITE);} else { display.fillRect(startX,24,boxW,boxH,BLACK); display.setTextColor(WHITE,BLACK);} display.setCursor(startX+2,24); display.print("OFF");}
     else { char buf[6]; snprintf(buf,sizeof(buf),"%u",val); int len=strlen(buf); int digitWidth=11; int boxW=len*digitWidth+6; if (blinkState) { display.fillRect(startX,24,boxW,18,WHITE); display.setTextColor(BLACK,WHITE);} else { display.fillRect(startX,24,boxW,18,BLACK); display.setTextColor(WHITE,BLACK);} display.setCursor(startX+2,24); display.print(buf); display.setTextColor(WHITE,BLACK); display.setCursor(startX+boxW+2,24); display.print('s'); }
     display.setTextSize(1); display.setTextColor(WHITE,BLACK); display.setCursor(50,46); if (val==0) display.print("OFF"); else display.print("    "); display.setCursor(0,56); display.print("#=Save *=Cancel");
+}
+
+void DisplayManager::drawHelp(const MenuSystem& menu) {
+    display.clearDisplay();
+    display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+    float basePos = menu.getHelpScrollPos();
+    // Only draw lines that have their baseline within visible region ( -15 .. 63 )
+    for (int line=0; line<menu.getHelpLines(); ++line) {
+        float logicalY = (line - basePos) * 16.0f; // baseline
+        if (logicalY < -15 || logicalY > 63) continue; // outside view for baseline
+        int y = (int)logicalY;
+        // clear a band for this line (height 16) to avoid remnants when overlapping during scroll
+        display.fillRect(0, y, 126, 16, BLACK); // leave last 2 px for scrollbar only
+        display.setCursor(0, y);
+        display.print(menu.getHelpLine(line));
+    }
+    // Scroll indicator: rightmost 2 pixels column, proportional position
+    int total = menu.getHelpLines();
+    int visible = 4;
+    float scrollF = menu.getHelpScrollPos();
+    if (total > visible) {
+        int trackX = 126; // columns 126-127
+        int trackY = 0;
+        int trackH = 64; // full height
+        // compute thumb height (at least 4 px)
+        int thumbH = (trackH * visible) / total;
+        if (thumbH < 4) thumbH = 4;
+        int maxScroll = total - visible;
+        int thumbY = (maxScroll>0) ? (int)(((trackH - thumbH) * scrollF) / (float)maxScroll) : 0;
+        // draw track background (optional left blank) -> just draw thumb
+        display.fillRect(trackX, thumbY, 2, thumbH, WHITE);
+    }
 }

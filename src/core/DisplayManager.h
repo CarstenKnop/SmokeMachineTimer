@@ -20,5 +20,6 @@ private:
   void drawMenu(const MenuSystem& menu);
   void drawResult(const MenuSystem& menu);
   void drawSaverEdit(const MenuSystem& menu, bool blinkState);
+  void drawHelp(const MenuSystem& menu);
   Adafruit_SSD1306 display{128,64,&Wire,-1}; Screensaver* screensaver=nullptr;
 };

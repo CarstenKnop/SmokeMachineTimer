@@ -44,9 +44,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Helper to print timer value in 0000.0s format at a given y position, with a small label
 void printTimerValue(uint32_t value, int y, const char* label, int editDigit = 255, bool editMode = false, bool blinkState = false, int startX = 26) {
+  // value in tenths: integer part = value/10, fractional = value%10
   char buf[8];
-  unsigned long t = value / 1;
-  snprintf(buf, sizeof(buf), "%04lu%01lu", t / 10, t % 10);
+  unsigned long integerPart = value / 10;
+  unsigned long frac = value % 10;
+  snprintf(buf, sizeof(buf), "%04lu%01lu", integerPart, frac);
   display.setTextSize(2);
   int digitWidth = 11;
   int x = startX;
@@ -82,28 +84,52 @@ void printTimerValue(uint32_t value, int y, const char* label, int editDigit = 2
 // Timer settings
 #define EEPROM_ADDR 0
 
-uint32_t offTime = 1000; // ms, default 10.00s
-uint32_t onTime = 1000;  // ms, default 10.00s
+// Stored in tenths of a second (value 100 = 10.0s)
+uint32_t offTime = 100; // default 10.0s
+uint32_t onTime  = 100; // default 10.0s
 uint32_t timer = 0;
 bool relayState = false;
-bool editMode = false;
-uint8_t editDigit = 0; // 0-5: Off, 6-11: On
+// Application states
+enum class AppState : uint8_t { RUN, EDIT };
+AppState appState = AppState::RUN;
+uint8_t editDigit = 0; // 0-4: Off digits, 5-9: On digits (fractional at index 4 & 9)
+
+// Forward state helpers
+void enterEditMode();
+void exitEditMode(bool forceSave);
+void render(bool blinkState, uint8_t editDigit, bool inEdit);
+void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool downEdge, bool hashEdge, unsigned long now);
+
+// Persistent digit buffers for edit mode
+static uint8_t offDigits[DIGITS];
+static uint8_t onDigits[DIGITS];
+static bool editDigitsInitialized = false;
 
 // Persistence throttle
 static bool timersDirty = false;            // true when values changed in edit mode
-static unsigned long lastEditChange = 0;    // millis timestamp of last digit modification
-const unsigned long SAVE_DELAY_MS = 2000;   // wait this long after last change before saving
 
-void markTimersDirty() {
-  timersDirty = true;
-  lastEditChange = millis();
+// Forward declarations for persistence helpers
+void saveTimers();
+void loadTimers();
+
+void markTimersDirty() { timersDirty = true; }
+
+// State transition helpers
+void enterEditMode() {
+  appState = AppState::EDIT;
+  editDigit = 0;
+  editDigitsInitialized = false; // force buffer load
 }
 
-void maybeSaveTimers(bool force = false) {
-  if (!timersDirty && !force) return;
-  if (!force && (millis() - lastEditChange) < SAVE_DELAY_MS) return;
-  saveTimers();
-  timersDirty = false;
+void exitEditMode(bool forceSave) {
+  if (appState == AppState::EDIT) {
+    appState = AppState::RUN;
+    editDigitsInitialized = false;
+    if (forceSave && timersDirty) {
+      saveTimers();
+      timersDirty = false;
+    }
+  }
 }
 
 // Button state
@@ -118,8 +144,9 @@ void saveTimers() {
 void loadTimers() {
   EEPROM.get(EEPROM_ADDR, offTime);
   EEPROM.get(EEPROM_ADDR + sizeof(offTime), onTime);
-  if (offTime < TIMER_MIN || offTime > TIMER_MAX * 10) offTime = 1000;
-  if (onTime < TIMER_MIN || onTime > TIMER_MAX * 10) onTime = 1000;
+  // Validate (values already stored as tenths)
+  if (offTime < TIMER_MIN || offTime > TIMER_MAX) offTime = 100; // 10.0s fallback
+  if (onTime  < TIMER_MIN || onTime  > TIMER_MAX) onTime  = 100; // 10.0s fallback
 }
 
 void setup() {
@@ -153,6 +180,136 @@ void setup() {
   display.display();
 }
 
+// Edit state handler extracted from loop for clarity
+void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool downEdge, bool hashEdge, unsigned long now) {
+  static bool requireRelease = false;
+  static unsigned long lastUpDown = 0;
+  static unsigned long hashHoldStart = 0;
+  static bool hashWasHeld = false;
+  static bool firstCycle = true;
+  static unsigned long holdStart = 0; // for refined auto-repeat
+  const unsigned long INITIAL_DELAY = 400;
+  const unsigned long FAST_INTERVAL  = 120;
+
+  // Track # hold
+  if (hash) {
+    if (hashHoldStart == 0) hashHoldStart = now;
+  } else {
+    hashHoldStart = 0;
+    hashWasHeld = false;
+  }
+
+  // Initialize digit buffers if needed
+  if (!editDigitsInitialized) {
+    uint32_t tempOffInt = offTime / 10;
+    uint8_t  tempOffFrac = offTime % 10;
+    uint32_t tempOnInt  = onTime / 10;
+    uint8_t  tempOnFrac = onTime % 10;
+    offDigits[DIGITS - 1] = tempOffFrac;
+    onDigits [DIGITS - 1] = tempOnFrac;
+    for (int i = DIGITS - 2; i >= 0; --i) { offDigits[i] = tempOffInt % 10; tempOffInt /= 10; }
+    for (int i = DIGITS - 2; i >= 0; --i) { onDigits[i]  = tempOnInt  % 10; tempOnInt  /= 10; }
+    editDigitsInitialized = true;
+  }
+
+  bool upHeld = up;
+  bool downHeld = down;
+  bool actUp = upEdge;
+  bool actDown = downEdge;
+
+  if (firstCycle) {
+    requireRelease = true; // must release both buttons once after entering
+    firstCycle = false;
+  }
+  if (requireRelease) {
+    if (!upHeld && !downHeld) {
+      requireRelease = false;
+      holdStart = 0;
+    }
+    actUp = actDown = false;
+  } else {
+    // Refined auto-repeat: initial longer delay, then faster repeat
+    if (upHeld || downHeld) {
+      if (holdStart == 0) holdStart = now; // start hold timer
+      unsigned long heldFor = now - holdStart;
+      if (heldFor > INITIAL_DELAY) {
+        if (now - lastUpDown > FAST_INTERVAL) {
+          if (upHeld) actUp = true;
+          if (downHeld) actDown = true;
+          lastUpDown = now;
+        } else {
+          actUp = actDown = false; // wait until interval passes
+        }
+      } else {
+        // During initial delay, only allow the edge event already captured
+        if (!upEdge) actUp = false;
+        if (!downEdge) actDown = false;
+      }
+    } else {
+      holdStart = 0; // reset when released
+    }
+  }
+
+  uint8_t *digits = (editDigit < DIGITS) ? offDigits : onDigits;
+  uint8_t digit = editDigit % DIGITS;
+  uint8_t originalDigitVal = digits[digit];
+  bool changed = false;
+  if (actUp)  { digits[digit] = (digits[digit] + 1) % 10; changed = true; }
+  if (actDown){ digits[digit] = (digits[digit] + 9) % 10; changed = true; }
+  if (changed) {
+    uint32_t newVal = 0;
+    for (int i = 0; i < DIGITS; ++i) newVal = newVal * 10 + digits[i];
+    if (newVal < TIMER_MIN || newVal > TIMER_MAX) {
+      digits[digit] = originalDigitVal; // revert this digit only
+    } else {
+      uint32_t *editVal = (editDigit < DIGITS) ? &offTime : &onTime;
+      if (*editVal != newVal) {
+        *editVal = newVal;
+        markTimersDirty();
+      }
+    }
+  }
+
+  // Advance / exit logic
+  if (hashEdge) {
+    editDigit++;
+    if (editDigit >= DIGITS * 2) {
+      exitEditMode(true); // saves only if values changed
+      firstCycle = true;
+      return;
+    }
+    requireRelease = true;
+  } else if (hash && !hashWasHeld && hashHoldStart && (now - hashHoldStart >= 2000)) {
+    hashWasHeld = true;
+    exitEditMode(true); // saves only if values changed
+    firstCycle = true;
+  }
+}
+
+void render(bool blinkState, uint8_t editDigit, bool inEdit) {
+  display.clearDisplay();
+  display.setTextSize(2);
+  // Visual cue for unsaved changes: leading '!' top-left when in edit mode and timersDirty
+  if (inEdit && timersDirty) {
+    display.setCursor(0, 0);
+    display.setTextColor(WHITE, BLACK);
+    display.print('!');
+  } else {
+    // Clear area where cue would be to avoid ghosting
+    display.fillRect(0, 0, 12, 16, BLACK);
+  }
+  printTimerValue(offTime, 0, "OFF", (inEdit && editDigit < DIGITS) ? editDigit : 255, inEdit && editDigit < DIGITS, blinkState);
+  printTimerValue(onTime, 24, "ON", (inEdit && editDigit >= DIGITS) ? (editDigit - DIGITS) : 255, inEdit && editDigit >= DIGITS, blinkState);
+  display.setCursor(0, 48);
+  if (inEdit) {
+    display.print("EDIT MODE");
+  } else {
+    if (relayState) display.print("*   "); else display.print("    ");
+    printTimerValue(timer, 48, "TIME");
+  }
+  display.display();
+}
+
 void loop() {
   // Read buttons (active low)
   bool up = !digitalRead(BTN_UP);
@@ -181,137 +338,31 @@ void loop() {
   static unsigned long lastBlink = 0;
   unsigned long now = millis();
 
-  // Require up/down release after entering edit mode
-  static bool requireRelease = false;
-
   // Blinking for edit digit
-  if (editMode && now - lastBlink > 350) {
+  if (appState == AppState::EDIT && now - lastBlink > 350) {
     blinkState = !blinkState;
     lastBlink = now;
   }
 
-  // Hold-to-repeat for up/down in edit mode
-  static unsigned long lastUpDown = 0;
-  bool upHeld = up && lastUp;
-  bool downHeld = down && lastDown;
-  bool actUp = upEdge;
-  bool actDown = downEdge;
-  if (editMode) {
-    if (requireRelease) {
-      // Wait for both up and down to be released before allowing changes
-      if (!up && !down) requireRelease = false;
-      actUp = false;
-      actDown = false;
-    } else {
-      if ((upHeld || downHeld) && now - lastUpDown > 180) {
-        if (upHeld) actUp = true;
-        if (downHeld) actDown = true;
-        lastUpDown = now;
-      }
-    }
-  }
-
-  if (editMode) {
-    // Editing mode
-    uint32_t *editVal = (editDigit < DIGITS) ? &offTime : &onTime;
-    uint8_t digit = editDigit % DIGITS;
-    // Extract digits
-    uint32_t val = *editVal / 10;
-    uint8_t digits[DIGITS];
-    uint32_t temp = val;
-    for (int i = DIGITS - 1; i >= 0; --i) {
-      digits[i] = temp % 10;
-      temp /= 10;
-    }
-    if (actUp) { digits[digit] = (digits[digit] + 1) % 10; markTimersDirty(); }
-    if (actDown) { digits[digit] = (digits[digit] + 9) % 10; markTimersDirty(); }
-    // Reconstruct value
-    uint32_t newVal = 0;
-    for (int i = 0; i < DIGITS; ++i) {
-      newVal = newVal * 10 + digits[i];
-    }
-  if (newVal < TIMER_MIN) newVal = TIMER_MIN;
-  if (newVal > TIMER_MAX) newVal = TIMER_MAX;
-  if (*editVal != newVal * 10) { *editVal = newVal * 10; markTimersDirty(); }
-    // # short press advances digit; 2s hold exits edit mode
-    if (hashEdge) {
-      editDigit++;
-      if (editDigit >= DIGITS * 2) {
-        editMode = false;
-        maybeSaveTimers(true); // force save at end of edit sequence
-      }
-      requireRelease = true;
-    } else if (hash && !hashWasHeld && hashHoldStart && (millis() - hashHoldStart >= 2000)) {
-      // Long hold exit
-      hashWasHeld = true;
-      editMode = false;
-      maybeSaveTimers(true); // force save on long-hold exit
-      requireRelease = true;
-    }
+  if (appState == AppState::EDIT) {
+    handleEditState(up, down, hash, star, upEdge, downEdge, hashEdge, now);
   } else {
-    // Run mode
-    if (hashEdge) {
-      // Reset timer
-      relayState = false;
-      timer = 0;
-    }
-    if (starEdge) {
-      // Toggle output and shift timer to start of ON or OFF
-      relayState = !relayState;
-      timer = 0;
-    }
-    // Timer logic
+    // Run mode logic
+    if (hashEdge) { relayState = false; timer = 0; }
+    if (starEdge) { relayState = !relayState; timer = 0; }
     if (relayState) {
-      if (timer < onTime) {
-        timer++;
-      } else {
-        relayState = false;
-        timer = 0;
-      }
+      if (timer < onTime) timer++; else { relayState = false; timer = 0; }
     } else {
-      if (timer < offTime) {
-        timer++;
-      } else {
-        relayState = true;
-        timer = 0;
-      }
+      if (timer < offTime) timer++; else { relayState = true; timer = 0; }
     }
-    if (upEdge || downEdge) {
-      editMode = true;
-      editDigit = 0;
-      requireRelease = true;
-    }
+    if (upEdge || downEdge) { enterEditMode(); }
   }
 
   // Periodic deferred save outside edit mode
-  if (!editMode) {
-    maybeSaveTimers(false);
-  }
+  // Removed deferred background save: EEPROM only written on edit exit if changed
   digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);
 
   // Display
-  display.clearDisplay();
-  display.setTextSize(2);
-  
-  // T1 row (first line, label OFF)
-  printTimerValue(offTime, 0, "OFF", (editMode && editDigit < DIGITS) ? editDigit : 255, editMode && editDigit < DIGITS, blinkState);
-
-  // T2 row (second line, label ON)
-  printTimerValue(onTime, 24, "ON", (editMode && editDigit >= DIGITS) ? (editDigit - DIGITS) : 255, editMode && editDigit >= DIGITS, blinkState);
-
-  // Status row (third line, size 2)
-  display.setCursor(0, 48);
-  if (editMode) {
-    display.print("EDIT MODE");
-  } else {
-    // ON/OFF indicator
-    if (relayState) {
-      display.print("*   ");
-    } else {
-      display.print("    ");
-    }
-    printTimerValue(timer, 48, "TIME");
-  }
-  display.display();
+  render(blinkState, editDigit, appState == AppState::EDIT);
   delay(10);
 }

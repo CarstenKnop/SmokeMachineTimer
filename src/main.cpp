@@ -109,6 +109,10 @@ static unsigned long menuResultStart = 0;
 const int MENU_COUNT = 10;
 const unsigned long MENU_PROGRESS_START_MS = 1000; // show bar after 1s
 const unsigned long MENU_PROGRESS_FULL_MS  = 5000; // full at 5s
+// Smooth scrolling variables for menu
+static float menuScrollPos = 0.0f; // animated index position
+static unsigned long lastScrollUpdate = 0;
+const float MENU_SCROLL_SPEED = 5.0f; // units per second toward target
 
 // Persistent digit buffers for edit mode
 static uint8_t offDigits[DIGITS];
@@ -326,6 +330,16 @@ void render(bool blinkState, uint8_t editDigit, bool inEdit) {
     case AppState::RUN:
       if (relayState) display.print("*   "); else display.print("    ");
       printTimerValue(timer, 48, "TIME");
+      // Early menu indicator: show 'M' at (0,0) while # held but before progress bar start
+      if (hashHoldStartGlobal != 0) {
+        unsigned long held = millis() - hashHoldStartGlobal;
+        if (held < MENU_PROGRESS_START_MS) {
+          display.setTextSize(2);
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(0,0);
+          display.print('M');
+        }
+      }
       break;
     case AppState::MENU_PROGRESS: {
       // Draw progress bar (0..100%) full width minus margins
@@ -341,29 +355,52 @@ void render(bool blinkState, uint8_t editDigit, bool inEdit) {
       display.drawRect(barX, barY, barW, barH, WHITE);
       int fillW = (int)((barW - 2) * prog);
       if (fillW > 0) display.fillRect(barX + 1, barY + 1, fillW, barH - 2, WHITE);
+      // When full progress reached, show inverted centered blinking MENU label
+      if (held >= MENU_PROGRESS_FULL_MS) {
+        static bool menuFullBlink = false;
+        static unsigned long lastBlinkFull = 0;
+        if (millis() - lastBlinkFull > 400) { menuFullBlink = !menuFullBlink; lastBlinkFull = millis(); }
+        if (menuFullBlink) {
+          const char *txt = "MENU";
+          int txtWidth = 4 * 12; // approximate 4 chars * 12px each at size 2
+          int xTxt = barX + (barW - txtWidth) / 2;
+          int yTxt = barY + 2;
+          display.setTextColor(BLACK, WHITE);
+          display.setCursor(xTxt, yTxt);
+          display.print(txt);
+        }
+      }
       break; }
     case AppState::MENU_SELECT: {
-      // Full screen 3-line menu, size 2 font
+      // Smooth scrolling list: show three adjacent items centered with interpolation
       display.clearDisplay();
       display.setTextSize(2);
-      // Determine indices for previous, current, next (with wrap)
-      int prev = (menuIndex - 1 + MENU_COUNT) % MENU_COUNT;
-      int curr = menuIndex;
-      int next = (menuIndex + 1) % MENU_COUNT;
-      // Line heights at y = 0, 24, 48 (already using 24px spacing consistent with earlier layout)
-      // Previous
-      display.setCursor(0,0);
-      display.setTextColor(WHITE, BLACK);
-      display.print("  M"); display.print(prev + 1);
-      // Current highlighted (invert)
-      display.fillRect(0,24,128,20,WHITE);
-      display.setCursor(0,24);
-      display.setTextColor(BLACK, WHITE);
-      display.print("> M"); display.print(curr + 1);
-      // Next
-      display.setTextColor(WHITE, BLACK);
-      display.setCursor(0,48);
-      display.print("  M"); display.print(next + 1);
+      // Each item row height (approx) we treat as 24px spacing
+      float centerY = 24.0f; // center row y position
+      // Fractional offset from integer position
+      float offset = menuScrollPos - floor(menuScrollPos);
+      int baseIndex = (int)floor(menuScrollPos) % MENU_COUNT;
+      if (baseIndex < 0) baseIndex += MENU_COUNT;
+
+      // We draw items for rows -1, 0, +1 relative to baseIndex
+      for (int rel = -1; rel <= 1; ++rel) {
+        int idx = (baseIndex + rel + MENU_COUNT) % MENU_COUNT;
+        float logicalRow = (float)rel - offset; // 0 is current target row
+        float y = centerY + logicalRow * 24.0f; // vertical interpolation
+        int yi = (int) y;
+        // Determine if this is the selected (nearest) item
+        bool isSelected = fabs(logicalRow) < 0.5f; // close to center
+        if (isSelected) {
+          display.fillRect(0, yi, 128, 20, WHITE);
+          display.setTextColor(BLACK, WHITE);
+          display.setCursor(0, yi);
+          display.print("> M"); display.print(idx + 1);
+        } else {
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(0, yi);
+          display.print("  M"); display.print(idx + 1);
+        }
+      }
       break; }
     case AppState::MENU_RESULT: {
       display.clearDisplay();
@@ -436,20 +473,20 @@ void loop() {
       hashHoldStartGlobal = 0;
     }
   } else if (appState == AppState::MENU_PROGRESS) {
-    // Continue measuring hold; if released before reaching threshold, revert to RUN
+    // Progress bar phase: must hold until full (>= MENU_PROGRESS_FULL_MS) to unlock menu
     if (hash) {
+      // Still holding; nothing else required here
+    } else {
       unsigned long held = now - hashHoldStartGlobal;
       if (held >= MENU_PROGRESS_FULL_MS) {
-        // Reached full progress but still holding; stay until release
-      }
-    } else {
-      // Released -> enter menu select if at least started progress phase
-      unsigned long held = now - hashHoldStartGlobal;
-      if (held >= MENU_PROGRESS_START_MS) {
+        // Full hold achieved -> enter menu select on release
         appState = AppState::MENU_SELECT;
         menuIndex = 0;
+        menuScrollPos = (float)menuIndex;
+        lastScrollUpdate = now;
       } else {
-        appState = AppState::RUN; // cancelled
+        // Not fully held -> cancel
+        appState = AppState::RUN;
       }
       hashHoldStartGlobal = 0;
     }
@@ -461,6 +498,26 @@ void loop() {
       selectedMenu = menuIndex;
       appState = AppState::MENU_RESULT;
       menuResultStart = now;
+    }
+    // Animate scroll position toward menuIndex
+    unsigned long dtMs = now - lastScrollUpdate;
+    if (dtMs > 0) {
+      float dt = dtMs / 1000.0f;
+      float target = (float)menuIndex;
+      float diff = target - menuScrollPos;
+      // Wrap shortest path for cyclic menu (choose direction across boundary if shorter)
+      if (diff > (MENU_COUNT / 2)) diff -= MENU_COUNT;
+      else if (diff < -(MENU_COUNT / 2)) diff += MENU_COUNT;
+      float step = MENU_SCROLL_SPEED * dt;
+      if (fabs(diff) <= step) {
+        menuScrollPos = target;
+      } else {
+        menuScrollPos += (diff > 0 ? step : -step);
+        // Normalize into range 0..MENU_COUNT
+        if (menuScrollPos < 0) menuScrollPos += MENU_COUNT;
+        if (menuScrollPos >= MENU_COUNT) menuScrollPos -= MENU_COUNT;
+      }
+      lastScrollUpdate = now;
     }
   } else if (appState == AppState::MENU_RESULT) {
     if (now - menuResultStart >= 5000) {

@@ -90,7 +90,7 @@ uint32_t onTime  = 100; // default 10.0s
 uint32_t timer = 0;
 bool relayState = false;
 // Application states
-enum class AppState : uint8_t { RUN, EDIT };
+enum class AppState : uint8_t { RUN, EDIT, MENU_PROGRESS, MENU_SELECT, MENU_RESULT };
 AppState appState = AppState::RUN;
 uint8_t editDigit = 0; // 0-4: Off digits, 5-9: On digits (fractional at index 4 & 9)
 
@@ -99,6 +99,16 @@ void enterEditMode();
 void exitEditMode(bool forceSave);
 void render(bool blinkState, uint8_t editDigit, bool inEdit);
 void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool downEdge, bool hashEdge, unsigned long now);
+
+// Menu / progress tracking
+static unsigned long hashHoldStartGlobal = 0; // tracks # hold in RUN
+static bool hashHoldActive = false;
+static int menuIndex = 0; // 0-9
+static int selectedMenu = -1;
+static unsigned long menuResultStart = 0;
+const int MENU_COUNT = 10;
+const unsigned long MENU_PROGRESS_START_MS = 1000; // show bar after 1s
+const unsigned long MENU_PROGRESS_FULL_MS  = 5000; // full at 5s
 
 // Persistent digit buffers for edit mode
 static uint8_t offDigits[DIGITS];
@@ -289,23 +299,82 @@ void handleEditState(bool up, bool down, bool hash, bool star, bool upEdge, bool
 void render(bool blinkState, uint8_t editDigit, bool inEdit) {
   display.clearDisplay();
   display.setTextSize(2);
-  // Visual cue for unsaved changes: leading '!' top-left when in edit mode and timersDirty
-  if (inEdit && timersDirty) {
-    display.setCursor(0, 0);
-    display.setTextColor(WHITE, BLACK);
-    display.print('!');
-  } else {
-    // Clear area where cue would be to avoid ghosting
-    display.fillRect(0, 0, 12, 16, BLACK);
+  AppState state = appState;
+
+  // Hide timers entirely during menu selection/result full-screen modes
+  bool showTimers = !(state == AppState::MENU_SELECT || state == AppState::MENU_RESULT);
+
+  if (showTimers) {
+    if (inEdit && timersDirty) {
+      display.setCursor(0, 0);
+      display.setTextColor(WHITE, BLACK);
+      display.print('!');
+    } else {
+      display.fillRect(0, 0, 12, 16, BLACK);
+    }
+    printTimerValue(offTime, 0, "OFF", (inEdit && editDigit < DIGITS) ? editDigit : 255, inEdit && editDigit < DIGITS, blinkState);
+    printTimerValue(onTime, 24, "ON", (inEdit && editDigit >= DIGITS) ? (editDigit - DIGITS) : 255, inEdit && editDigit >= DIGITS, blinkState);
   }
-  printTimerValue(offTime, 0, "OFF", (inEdit && editDigit < DIGITS) ? editDigit : 255, inEdit && editDigit < DIGITS, blinkState);
-  printTimerValue(onTime, 24, "ON", (inEdit && editDigit >= DIGITS) ? (editDigit - DIGITS) : 255, inEdit && editDigit >= DIGITS, blinkState);
+
+  // Third line content depends on state
   display.setCursor(0, 48);
-  if (inEdit) {
-    display.print("EDIT MODE");
-  } else {
-    if (relayState) display.print("*   "); else display.print("    ");
-    printTimerValue(timer, 48, "TIME");
+  display.setTextSize(2);
+  switch (state) {
+    case AppState::EDIT:
+      display.print("EDIT MODE");
+      break;
+    case AppState::RUN:
+      if (relayState) display.print("*   "); else display.print("    ");
+      printTimerValue(timer, 48, "TIME");
+      break;
+    case AppState::MENU_PROGRESS: {
+      // Draw progress bar (0..100%) full width minus margins
+      unsigned long held = millis() - hashHoldStartGlobal;
+      float prog = 0.0f;
+      if (held > MENU_PROGRESS_START_MS) {
+        unsigned long span = (held - MENU_PROGRESS_START_MS);
+        unsigned long total = MENU_PROGRESS_FULL_MS - MENU_PROGRESS_START_MS;
+        if (span > total) span = total;
+        prog = (float)span / (float)total;
+      }
+      int barX = 0, barY = 48, barW = 128, barH = 16;
+      display.drawRect(barX, barY, barW, barH, WHITE);
+      int fillW = (int)((barW - 2) * prog);
+      if (fillW > 0) display.fillRect(barX + 1, barY + 1, fillW, barH - 2, WHITE);
+      break; }
+    case AppState::MENU_SELECT: {
+      // Full screen 3-line menu, size 2 font
+      display.clearDisplay();
+      display.setTextSize(2);
+      // Determine indices for previous, current, next (with wrap)
+      int prev = (menuIndex - 1 + MENU_COUNT) % MENU_COUNT;
+      int curr = menuIndex;
+      int next = (menuIndex + 1) % MENU_COUNT;
+      // Line heights at y = 0, 24, 48 (already using 24px spacing consistent with earlier layout)
+      // Previous
+      display.setCursor(0,0);
+      display.setTextColor(WHITE, BLACK);
+      display.print("  M"); display.print(prev + 1);
+      // Current highlighted (invert)
+      display.fillRect(0,24,128,20,WHITE);
+      display.setCursor(0,24);
+      display.setTextColor(BLACK, WHITE);
+      display.print("> M"); display.print(curr + 1);
+      // Next
+      display.setTextColor(WHITE, BLACK);
+      display.setCursor(0,48);
+      display.print("  M"); display.print(next + 1);
+      break; }
+    case AppState::MENU_RESULT: {
+      display.clearDisplay();
+      display.setTextSize(2);
+      display.setCursor(0,0);
+      display.print("Selected");
+      display.setCursor(0,24);
+      display.print("Menu ");
+      display.print(selectedMenu + 1);
+      // Leave third line blank or could show countdown
+      break; }
   }
   display.display();
 }
@@ -346,7 +415,7 @@ void loop() {
 
   if (appState == AppState::EDIT) {
     handleEditState(up, down, hash, star, upEdge, downEdge, hashEdge, now);
-  } else {
+  } else if (appState == AppState::RUN) {
     // Run mode logic
     if (hashEdge) { relayState = false; timer = 0; }
     if (starEdge) { relayState = !relayState; timer = 0; }
@@ -356,6 +425,47 @@ void loop() {
       if (timer < offTime) timer++; else { relayState = true; timer = 0; }
     }
     if (upEdge || downEdge) { enterEditMode(); }
+    // Track # hold for menu progress
+    if (hash) {
+      if (hashHoldStartGlobal == 0) hashHoldStartGlobal = now;
+      unsigned long held = now - hashHoldStartGlobal;
+      if (held >= MENU_PROGRESS_START_MS) {
+        appState = AppState::MENU_PROGRESS;
+      }
+    } else {
+      hashHoldStartGlobal = 0;
+    }
+  } else if (appState == AppState::MENU_PROGRESS) {
+    // Continue measuring hold; if released before reaching threshold, revert to RUN
+    if (hash) {
+      unsigned long held = now - hashHoldStartGlobal;
+      if (held >= MENU_PROGRESS_FULL_MS) {
+        // Reached full progress but still holding; stay until release
+      }
+    } else {
+      // Released -> enter menu select if at least started progress phase
+      unsigned long held = now - hashHoldStartGlobal;
+      if (held >= MENU_PROGRESS_START_MS) {
+        appState = AppState::MENU_SELECT;
+        menuIndex = 0;
+      } else {
+        appState = AppState::RUN; // cancelled
+      }
+      hashHoldStartGlobal = 0;
+    }
+  } else if (appState == AppState::MENU_SELECT) {
+    // Navigate menu
+    if (upEdge) { menuIndex = (menuIndex - 1 + MENU_COUNT) % MENU_COUNT; }
+    if (downEdge) { menuIndex = (menuIndex + 1) % MENU_COUNT; }
+    if (hashEdge) {
+      selectedMenu = menuIndex;
+      appState = AppState::MENU_RESULT;
+      menuResultStart = now;
+    }
+  } else if (appState == AppState::MENU_RESULT) {
+    if (now - menuResultStart >= 5000) {
+      appState = AppState::RUN;
+    }
   }
 
   // Periodic deferred save outside edit mode

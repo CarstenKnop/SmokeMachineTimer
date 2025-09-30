@@ -90,10 +90,6 @@ bool editMode = false;
 uint8_t editDigit = 0; // 0-5: Off, 6-11: On
 
 // Button state
-// Globals for edit mode and blinking for printTimerValue
-bool editModeGlobal = false;
-uint8_t editDigitGlobal = 255;
-bool blinkStateGlobal = false;
 bool lastUp = false, lastDown = false, lastHash = false, lastStar = false;
 
 void saveTimers() {
@@ -154,10 +150,22 @@ void loop() {
   bool starEdge = star && !lastStar;
   lastUp = up; lastDown = down; lastHash = hash; lastStar = star;
 
-  static unsigned long lastEditStep = 0;
+  // Track # button hold for exiting edit mode
+  static unsigned long hashHoldStart = 0;
+  static bool hashWasHeld = false;
+  if (hash) {
+    if (hashHoldStart == 0) hashHoldStart = millis();
+  } else {
+    hashHoldStart = 0;
+    hashWasHeld = false;
+  }
+
   static bool blinkState = false;
   static unsigned long lastBlink = 0;
   unsigned long now = millis();
+
+  // Require up/down release after entering edit mode
+  static bool requireRelease = false;
 
   // Blinking for edit digit
   if (editMode && now - lastBlink > 350) {
@@ -169,36 +177,63 @@ void loop() {
   static unsigned long lastUpDown = 0;
   bool upHeld = up && lastUp;
   bool downHeld = down && lastDown;
-  bool doUp = upEdge;
-  bool doDown = downEdge;
-  if (editMode && (upHeld || downHeld) && now - lastUpDown > 180) {
-    if (upHeld) doUp = true;
-    if (downHeld) doDown = true;
-    lastUpDown = now;
+  bool actUp = upEdge;
+  bool actDown = downEdge;
+  if (editMode) {
+    if (requireRelease) {
+      // Wait for both up and down to be released before allowing changes
+      if (!up && !down) requireRelease = false;
+  actUp = false;
+  actDown = false;
+    } else {
+      if ((upHeld || downHeld) && now - lastUpDown > 180) {
+  if (upHeld) actUp = true;
+  if (downHeld) actDown = true;
+        lastUpDown = now;
+      }
+    }
   }
 
   if (editMode) {
     // Editing mode
     uint32_t *editVal = (editDigit < DIGITS) ? &offTime : &onTime;
     uint8_t digit = editDigit % DIGITS;
-    uint32_t pow10 = pow(10, DIGITS - digit - 1);
+    // Extract digits
     uint32_t val = *editVal / 10;
-    if (doUp) {
-      val += pow10;
-      if (val > TIMER_MAX) val = TIMER_MIN;
-      *editVal = val * 10;
+    uint8_t digits[DIGITS];
+    uint32_t temp = val;
+    for (int i = DIGITS - 1; i >= 0; --i) {
+      digits[i] = temp % 10;
+      temp /= 10;
     }
-    if (doDown) {
-      if (val > TIMER_MIN) val -= pow10;
-      else val = TIMER_MAX;
-      *editVal = val * 10;
+  if (actUp) {
+      digits[digit] = (digits[digit] + 1) % 10;
     }
+  if (actDown) {
+      digits[digit] = (digits[digit] + 9) % 10;
+    }
+    // Reconstruct value
+    uint32_t newVal = 0;
+    for (int i = 0; i < DIGITS; ++i) {
+      newVal = newVal * 10 + digits[i];
+    }
+    if (newVal < TIMER_MIN) newVal = TIMER_MIN;
+    if (newVal > TIMER_MAX) newVal = TIMER_MAX;
+    *editVal = newVal * 10;
+    // # short press advances digit; 2s hold exits edit mode
     if (hashEdge) {
       editDigit++;
       if (editDigit >= DIGITS * 2) {
         editMode = false;
         saveTimers();
       }
+      requireRelease = true;
+    } else if (hash && !hashWasHeld && hashHoldStart && (millis() - hashHoldStart >= 2000)) {
+      // Long hold exit
+      hashWasHeld = true;
+      editMode = false;
+      saveTimers();
+      requireRelease = true;
     }
   } else {
     // Run mode
@@ -231,6 +266,7 @@ void loop() {
     if (upEdge || downEdge) {
       editMode = true;
       editDigit = 0;
+      requireRelease = true;
     }
   }
   digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);

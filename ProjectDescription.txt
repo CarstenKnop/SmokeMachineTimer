@@ -10,7 +10,12 @@ Connections:
    GPIO7 / SCL / D5 => SCL Display
 Features:
    On/Off timer (0000.1...9999.9 sec) timer. Both On and Off times shall be seatable.
+   
    Up or Down button shall enabled editing of the times. When hold down the digits shall increase/decrease.
+   The digit beeing changed is the only digit that shall be changed.
+   When going into edit mode the up/down button has to be released before changing digit values.
+   2 sec hold on # button shall exit edit mode.
+
    In editing mode the digit getting edited the have blinking inverted text/background.
    In edit mode, 1 digit at a time, shall be edited. When the 6 first Off time digits are edited, then it shall edit the next 6 On time digits.
    The # button shall be used to select next digit. When all is done it shall exit edit mode.

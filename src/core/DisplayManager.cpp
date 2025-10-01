@@ -1,8 +1,29 @@
+#ifndef ARDUINO
+#define F(x) x
+#endif
+
+// WiFi QR implementation notes:
+// We generate a standards-compatible Wi-Fi join payload of the form
+//   WIFI:T:<WPA|nopass>;S:<ssid>;P:<password>;;
+// (hidden flag omitted). For now password not exposed by WiFiService, so
+// open/nopass or WPA assumption placeholder. The trimmed qrcodegen encoder
+// included under lib/qrcodegen is a minimized adaptation providing byte-mode
+// encoding for small versions (1..10) with EC level selection. We choose
+// ECC=MEDIUM and allow automatic version growth. Quiet zone is reduced to
+// 2 modules due to 64px display height constraints; empirically phones are
+// tolerant. If scanning proves unreliable, increase quiet to 3 and/or reduce
+// title/header space.
 #include "DisplayManager.h"
 #include <cstring>
 
 void DisplayManager::begin() {
+    #if defined(QR_DUMP_SERIAL)
+    Serial.begin(115200);
+    unsigned long startWait = millis();
+    while(!Serial && (millis()-startWait)<1500) { /* wait up to 1.5s */ }
+    #endif
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { while (true) { delay(1000); } }
+    // Contrast API not available in this library version; rely on default.
     display.clearDisplay(); display.display(); splash();
 }
 
@@ -51,14 +72,17 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
             display.setTextColor(WHITE,BLACK); // restore default
         }
     }
-    switch(menu.getState()) {
-      case MenuSystem::State::INACTIVE: break;
-      case MenuSystem::State::PROGRESS: drawProgress(menu); break;
-      case MenuSystem::State::SELECT: drawMenu(menu); break;
-      case MenuSystem::State::RESULT: drawResult(menu); break;
-      case MenuSystem::State::SAVER_EDIT: drawSaverEdit(menu, blinkState); break;
+        switch(menu.getState()) {
+            case MenuSystem::State::INACTIVE: break;
+            case MenuSystem::State::PROGRESS: drawProgress(menu); break;
+            case MenuSystem::State::SELECT: drawMenu(menu); break;
+            case MenuSystem::State::RESULT: drawResult(menu); break;
+            case MenuSystem::State::SAVER_EDIT: drawSaverEdit(menu, blinkState); break;
+            case MenuSystem::State::WIFI_INFO: drawWiFiInfo(menu); break;
+            case MenuSystem::State::QR_DYN: drawDynQR(menu); break;
+            case MenuSystem::State::RICK: drawRick(menu); break;
             case MenuSystem::State::HELP: drawHelp(menu); break;
-    }
+        }
     display.display();
 }
 
@@ -142,4 +166,176 @@ void DisplayManager::drawHelp(const MenuSystem& menu) {
         // draw track background (optional left blank) -> just draw thumb
         display.fillRect(trackX, thumbY, 2, thumbH, WHITE);
     }
+}
+
+void DisplayManager::drawRick(const MenuSystem& menu) {
+    (void)menu;
+    display.clearDisplay();
+    // QR-only layout (full screen for QR code)
+    display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+#ifdef QR_STATIC_TEST_MODE
+    // In static test mode we bypass WiFi service and render a fixed known URL (rickroll) to validate real-world scanning.
+    #ifdef QR_TEST_V1
+    const char* testPayload = "HELLO"; // Force very short payload to stay at version 1
+    #else
+    const char* testPayload = "https://youtu.be/dQw4w9WgXcQ"; // version 2 expected
+    #endif
+    if (strcmp(testPayload,lastQrPayload)!=0) {
+        strncpy(lastQrPayload,testPayload,sizeof(lastQrPayload));
+        // Prefer auto mask (-1); fallback to mask 0 if that somehow fails
+    #ifdef QR_TEST_V1
+        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 1, -1, false);
+        if (!qrValid) qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 1, 0, false);
+    #else
+        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, -1, false);
+        if (!qrValid) qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, 0, false);
+    #endif
+        lastQrSize = qrValid ? qrcodegen_getSize(qrBuffer) : 0;
+        lastScale = 2;
+        #if defined(QR_DUMP_ASCII)
+        if (qrValid) {
+            Serial.println(F("[QR-DUMP-BEGIN]"));
+            Serial.print(F("VER=")); Serial.print(lastQrSize==21?1:(lastQrSize==25?2:lastQrSize));
+            Serial.print(F(" SIZE=")); Serial.println(lastQrSize);
+            for(int y=0;y<lastQrSize;y++){
+                for(int x=0;x<lastQrSize;x++) Serial.print(qrcodegen_getModule(qrBuffer,x,y)?'#':'.');
+                Serial.println();
+            }
+            Serial.println(F("[QR-DUMP-END]"));
+        }
+        #endif
+    }
+#else
+    if (!wifi || !wifi->isStarted()) {
+        display.setCursor(0,0); display.print(F("Starting AP..."));
+        qrValid = false;
+        return;
+    }
+
+    // Rebuild QR only if payload changed
+    char payload[sizeof(lastQrPayload)];
+    buildWifiQrString(payload,sizeof(payload));
+    if (strcmp(payload,lastQrPayload)!=0) {
+        strncpy(lastQrPayload,payload,sizeof(lastQrPayload));
+        // Try ECC Medium first (more robust)
+        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_MEDIUM, 1, 2, -1, false);
+        if (!qrValid) {
+            // Fallback to ECC Low for extra capacity
+            qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, -1, false);
+        }
+        lastQrSize = qrValid ? qrcodegen_getSize(qrBuffer) : 0;
+        lastScale = 2; // fixed module size
+    }
+#endif
+    if (!qrValid || lastQrSize==0) {
+        display.setCursor(0,0); display.print(F("QR too big"));
+        return;
+    }
+
+    const int scale = 2;
+    const int maxW = 128;
+    const int maxH = 64;
+    // Compute maximum quiet zone that fits vertically for given size/scale.
+    int maxQuietPossible = (maxH/scale - lastQrSize) / 2; // integer division
+    #ifdef QR_TEST_V1
+    // Try to use full quiet zone 4 if it fits for version 1 test
+    if ((lastQrSize + 8) * scale <= maxH) maxQuietPossible = 4;
+    #endif
+    if (maxQuietPossible > 4) maxQuietPossible = 4; // no spec need beyond 4
+    if (maxQuietPossible < 1) maxQuietPossible = 1; // at least 1 to separate edges
+    int quiet = maxQuietPossible; // pick largest that fits to maximize finder isolation
+    int totalModules = lastQrSize + 2*quiet;
+    int qrPix = totalModules * scale;
+    int fullLeft = (maxW - qrPix)/2; if (fullLeft<0) fullLeft=0;
+    int fullTop = (maxH - qrPix)/2; if (fullTop<0) fullTop=0;
+    int offX = fullLeft + quiet*scale;
+    int offY = fullTop + quiet*scale;
+    // Background: pure black outside, white square for quiet zone + code.
+    display.fillRect(0,0,128,64,BLACK);
+    display.fillRect(fullLeft, fullTop, qrPix, qrPix, WHITE);
+    for(int y=0;y<lastQrSize;++y){
+        for(int x=0;x<lastQrSize;++x){
+            if (qrcodegen_getModule(qrBuffer,x,y))
+                display.fillRect(offX + x*scale, offY + y*scale, scale, scale, BLACK);
+        }
+    }
+    #ifdef QR_FORCE_FINDERS
+    // Redraw canonical finder patterns to correct any accidental format-bit overwrite (diagnostic fix)
+    auto drawFinderScaled = [&](int fx,int fy){
+        for(int dy=0; dy<7; ++dy){
+            for(int dx=0; dx<7; ++dx){
+                bool dark = (dx==0||dx==6||dy==0||dy==6|| (dx>=2&&dx<=4&&dy>=2&&dy<=4));
+                int gx = fx+dx; int gy = fy+dy; if (gx<0||gy<0||gx>=lastQrSize||gy>=lastQrSize) continue;
+                int px = offX + gx*scale; int py = offY + gy*scale;
+                // Paint background module first to remove any mask artifacts
+                display.fillRect(px,py,scale,scale, dark?BLACK:WHITE);
+            }
+        }
+    };
+    drawFinderScaled(0,0);
+    drawFinderScaled(lastQrSize-7,0);
+    drawFinderScaled(0,lastQrSize-7);
+    #endif
+    #ifdef QR_DEBUG_OUTLINE
+    // Draw a 1px outline just outside quiet zone for diagnostic framing
+    display.drawRect(fullLeft-1, fullTop-1, qrPix+2, qrPix+2, WHITE);
+    #endif
+    // (Removed border rectangle to preserve clean quiet zone)
+}
+
+void DisplayManager::drawDynQR(const MenuSystem& menu) {
+    (void)menu;
+    display.clearDisplay();
+    display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+    if (!wifi || !wifi->isStarted()) {
+        display.setCursor(0,0); display.print(F("Starting AP..."));
+        return;
+    }
+    char payload[sizeof(lastQrPayload)];
+    buildWifiQrString(payload,sizeof(payload));
+    if (strcmp(payload,lastQrPayload)!=0) {
+        strncpy(lastQrPayload,payload,sizeof(lastQrPayload));
+        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_MEDIUM, 1, 2, -1, false);
+        if (!qrValid) qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, -1, false);
+        lastQrSize = qrValid ? qrcodegen_getSize(qrBuffer) : 0;
+        lastScale = 2;
+    }
+    if (!qrValid || lastQrSize==0) { display.setCursor(0,0); display.print(F("QR err")); return; }
+    int scale=2; int maxW=128; int maxH=64; int maxQuietPossible = (maxH/scale - lastQrSize) / 2; if (maxQuietPossible>4) maxQuietPossible=4; if (maxQuietPossible<1) maxQuietPossible=1; int quiet=maxQuietPossible; int totalModules= lastQrSize + 2*quiet; int qrPix= totalModules*scale; int fullLeft=(maxW-qrPix)/2; if(fullLeft<0) fullLeft=0; int fullTop=(maxH-qrPix)/2; if(fullTop<0) fullTop=0; int offX=fullLeft+quiet*scale; int offY=fullTop+quiet*scale; display.fillRect(0,0,128,64,BLACK); display.fillRect(fullLeft,fullTop,qrPix,qrPix,WHITE); for(int y=0;y<lastQrSize;++y){ for(int x=0;x<lastQrSize;++x){ if(qrcodegen_getModule(qrBuffer,x,y)) display.fillRect(offX+x*scale, offY+y*scale, scale, scale, BLACK);} }
+}
+
+void DisplayManager::drawWiFiInfo(const MenuSystem& menu) {
+    (void)menu;
+    display.clearDisplay();
+    display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+    if (!wifi || !wifi->isStarted()) { display.setCursor(0,0); display.print(F("WiFi not started")); return; }
+    const char* ssid = wifi->getSSID();
+    const char* pass = wifi->getPass();
+    display.setCursor(0,0); display.print(F("SSID:")); display.setCursor(0,8); display.print(ssid);
+    display.setCursor(0,24); display.print(F("PASS:")); display.setCursor(0,32); if(pass && *pass) display.print(pass); else display.print(F("<open>"));
+    // Removed back hint per request (navigation still via # or * )
+}
+void DisplayManager::escapeAppend(char c, char *&w, size_t &remain) {
+    if (c=='\\' || c==';' || c==',' || c==':' || c=='"') {
+        if (remain >= 2) { *w++='\\'; *w++=c; remain-=2; }
+    } else if (remain >=1) { *w++=c; remain--; }
+}
+
+void DisplayManager::buildWifiQrString(char *out, size_t cap) const {
+    if (!wifi) { if (cap>0) out[0]='\0'; return; }
+    const char* ssid = wifi->getSSID();
+    const char* pass = wifi->getPass();
+    char *w = out; size_t remain = cap;
+    auto put=[&](const char *s){ while(*s && remain>0){ *w++=*s++; remain--; } };
+    put("WIFI:T:");
+    if (pass && *pass) put("WPA"); else put("nopass");
+    put(";S:");
+    // Escape SSID
+    for (const char* p=ssid; *p && remain>1; ++p) escapeAppend(*p,w,remain);
+    if (pass && *pass) {
+        put(";P:");
+        for (const char* p=pass; *p && remain>1; ++p) escapeAppend(*p,w,remain);
+    }
+    put(";;");
+    if (remain>0) *w='\0';
 }

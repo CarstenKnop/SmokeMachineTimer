@@ -40,9 +40,14 @@ bool MenuSystem::handleSelect(const ButtonState& bs, unsigned long now, Config& 
     if (bs.starEdge) { state = State::INACTIVE; return true; }
     if (bs.hashEdge) {
         selectedMenu = menuIndex;
-    if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
-    else if (selectedMenu == 1) { enterHelp(); }
-        else { state = State::RESULT; menuResultStart = now; }
+        switch(selectedMenu) {
+            case 0: beginSaverEdit(config.get().screensaverDelaySec); break;
+            case 1: state = State::WIFI_INFO; break;
+            case 2: state = State::QR_DYN; break;
+            case 3: state = State::RICK; break;
+            case 4: enterHelp(); break;
+            default: state = State::RESULT; menuResultStart = now; break;
+        }
         return true;
     }
     return false;
@@ -116,13 +121,9 @@ void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& 
         switch(state) {
             case State::SELECT:
                 // navigation handled separately via navigate(); selection via hashEdge
-                if (bs.hashEdge) {
-                    selectedMenu = menuIndex;
-                    if (selectedMenu == 0) { beginSaverEdit(config.get().screensaverDelaySec); }
-                    else if (selectedMenu == 1) { enterHelp(); }
-                    else { state = State::RESULT; menuResultStart = now; }
-                } else if (bs.starEdge) {
-                    state = State::INACTIVE;
+                if (bs.hashEdge || bs.starEdge) {
+                    // delegate to handleSelect for consistency
+                    handleSelect(bs, now, config);
                 }
                 break;
             case State::SAVER_EDIT:
@@ -130,6 +131,11 @@ void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& 
                 break;
             case State::HELP:
                 handleHelp(bs);
+                break;
+            case State::WIFI_INFO:
+            case State::QR_DYN:
+            case State::RICK:
+                if (bs.hashEdge || bs.starEdge) { state = State::SELECT; }
                 break;
             case State::RESULT:
                 if (bs.hashEdge || bs.starEdge) { state = State::INACTIVE; }

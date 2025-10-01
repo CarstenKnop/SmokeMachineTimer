@@ -10,7 +10,7 @@
 
 class MenuSystem {
 public:
-  enum class State : uint8_t { INACTIVE, PROGRESS, SELECT, RESULT, SAVER_EDIT, HELP };
+  enum class State : uint8_t { INACTIVE, PROGRESS, SELECT, RESULT, SAVER_EDIT, WIFI_INFO, QR_DYN, RICK, HELP };
 
   void begin();
 
@@ -54,8 +54,20 @@ public:
   bool progressFull(unsigned long now) const;
 
   // Dynamic menu: currently two items (Saver, Help); can expand later
-  int getMenuCount() const { return 2; }
-  const char* getMenuName(int idx) const { return (idx==0)? SaverMenu::NAME : (idx==1? HelpContent::NAME : ""); }
+  int getMenuCount() const { return 5; }
+  const char* getMenuName(int idx) const {
+    switch(idx) {
+      case 0: return SaverMenu::NAME;
+      case 1: return "WiFi";        // info screen
+      case 2: return "QR";          // dynamic Wi-Fi QR
+      case 3: return "Rick";        // static Rickroll QR
+      case 4: return HelpContent::NAME;
+      default: return "";
+    }
+  }
+  bool inWiFiInfo() const { return state == State::WIFI_INFO; }
+  bool inDynQR() const { return state == State::QR_DYN; }
+  bool inRick() const { return state == State::RICK; }
 
   // Help support
   bool inHelp() const { return state == State::HELP; }

@@ -8,6 +8,7 @@
 #include "core/Screensaver.h"
 #include "core/MenuSystem.h"
 #include "core/DisplayManager.h"
+#include "core/WiFiService.h"
 
 static Config config;
 static Buttons buttons;
@@ -15,6 +16,8 @@ static TimerController timerCtl;
 static Screensaver screensaver;
 static MenuSystem menu;
 static DisplayManager displayMgr;
+static WiFiService wifiService;
+static bool wifiStarted=false;
 
 static unsigned long lastBlink = 0;
 static bool blinkState = false;
@@ -33,6 +36,7 @@ void setup() {
   screensaver.configure(config.get().screensaverDelaySec);
   screensaver.noteActivity(millis());
   displayMgr.attachScreensaver(&screensaver);
+  displayMgr.attachWiFi(&wifiService);
 }
 
 void loop() {
@@ -105,6 +109,13 @@ void loop() {
   // Menu logic
   if (menu.inSelect()) { menu.navigate(bs, now); }
   menu.processInput(bs, now, config, screensaver);
+  // Start WiFi AP when entering any WiFi-related screen first time
+  if ((menu.getState()==MenuSystem::State::WIFI_INFO || menu.getState()==MenuSystem::State::QR_DYN) && !wifiStarted) {
+    wifiService.begin("SmokeTimerAP", "", 80); // open AP, no password
+    wifiStarted=true;
+  }
+  // Service web requests if started
+  if (wifiStarted) wifiService.loop();
   if (menu.inHelp()) { menu.updateHelpAnimation(now); }
   menu.updateResult(now);
 

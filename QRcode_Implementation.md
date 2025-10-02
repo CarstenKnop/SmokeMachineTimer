@@ -1,7 +1,7 @@
-# 📱 Single QR Code to Connect to Sensor Network and Open Web App
+# 📱 Single QR Code to Connect to IoT devices and Open Web App
 
 ## 📖 Overview
-This project describes how to onboard users into a **sensor network** with just a single QR code.  
+This project describes how to onboard users into a **IoT devices** with just a single QR code.  
 By scanning the code, a user’s device connects to an ESP32-based Wi-Fi hotspot and automatically loads a **captive portal** web app hosted locally on the ESP32.  
 
 This approach avoids installing extra apps, works offline, and makes onboarding simple for IoT devices.  

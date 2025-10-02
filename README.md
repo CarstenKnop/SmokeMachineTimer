@@ -18,7 +18,7 @@ Core capabilities:
 |------|---------|
 | Timing | Independent OFF and ON phase duration (0.1–9999.9 s) |
 | Editing | Digit-by-digit edit flow without stopping the cycle |
-| Display | 128×64 SSD1306 OLED status + progress indications |
+| Display | 128×64 SSD1306/SSD1315 OLED status + progress indications |
 | Input | Four buttons: Up, Down, # (Select), * (Cancel/Exit) |
 | Power Saving | Inactivity screensaver (OFF or 10–990 s) |
 | Persistence | EEPROM-backed retention of cycle and screensaver settings |
@@ -29,7 +29,7 @@ Core capabilities:
 
 - Seeed XIAO ESP32-C3 module
 - Relay module (transistor / opto-isolated if switching higher current)
-- 128×64 I2C SSD1306 OLED display
+- 128×64 I2C SSD1306/SSD1315 OLED display
 - 4 × momentary buttons (Up, Down, #, *) with pull-ups (internal or external)
 - Stable 5 V (or appropriate) supply sized for relay coil + device load
 

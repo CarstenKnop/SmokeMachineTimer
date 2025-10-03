@@ -140,11 +140,11 @@ void setup() {
     return true;
   });
   // Portal now gated; will be started on-demand when user opens WiFi/QR menu
-  if (!MDNS.begin("smoketimer")) {
+  if (!MDNS.begin("fogtimer")) {
     Serial.println(F("[mDNS] Failed to start"));
   } else {
     MDNS.addService("http", "tcp", 80);
-    Serial.println(F("[mDNS] Advertised smoketimer.local"));
+  Serial.println(F("[mDNS] Advertised fogtimer.local"));
   }
 }
 
@@ -249,7 +249,7 @@ void loop() {
       Serial.print(F("[WiFi] AP Always saved=")); Serial.println(newVal);
       if (newVal) {
         if (!asyncPortal.isStarted() && config.get().wifiEnabled) {
-          if (asyncPortal.begin("SmokeTimerAP","",80)) Serial.println(F("[Portal] Started (AP always)"));
+          if (asyncPortal.begin("FogTimerAP","",80)) Serial.println(F("[Portal] Started (AP always)"));
         }
       } else {
         // If turning off and AP is suppressed+STA disconnected later, logic will stop after idle.
@@ -266,7 +266,7 @@ void loop() {
   if ((inPortalMenu || config.get().apAlwaysOn) && config.get().wifiEnabled) {
     portalLastActiveMenuMs = now;
     if (!asyncPortal.isStarted()) {
-      if (asyncPortal.begin("SmokeTimerAP","",80)) {
+  if (asyncPortal.begin("FogTimerAP","",80)) {
         Serial.println(F("[Portal] Started on-demand"));
       } else {
         Serial.println(F("[Portal] Failed to start"));

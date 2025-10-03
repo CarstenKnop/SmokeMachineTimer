@@ -52,5 +52,5 @@ namespace Defaults {
   static constexpr unsigned long LOOP_DELAY_MS = 10;
 
   // Version string
-  inline const char* VERSION() { return "SmokeMachineTimer v1.0"; }
+  inline const char* VERSION() { return "FogMachineTimer v1.0"; }
 }

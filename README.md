@@ -1,8 +1,8 @@
-# SmokeMachineTimer – ESP32-C3 Relay Cycle Controller
+# FogMachineTimer – ESP32-C3 Relay Cycle Controller
 
 ## Overview
 
-SmokeMachineTimer is firmware for the Seeed XIAO ESP32-C3 that drives a relay in repeating OFF / ON time cycles with a clear OLED interface and four‑button control. Suitable for pulsing fog/smoke machines, ventilation, dosing pumps, or other cyclic loads (ensure proper electrical ratings).
+FogMachineTimer is firmware for the Seeed XIAO ESP32-C3 that drives a relay in repeating OFF / ON time cycles with a clear OLED interface and four‑button control. Suitable for pulsing fog/fog machines, ventilation, dosing pumps, or other cyclic loads (ensure proper electrical ratings).
 
 Core capabilities:
 
@@ -155,7 +155,7 @@ Set in `main.cpp` via `setControlAuth()` / `setOtaAuth()`.
   "staIp":"10.1.2.55",
   "staRssi":-54,
   "staConnected":1,
-  "version":"SmokeMachineTimer v1.0"
+  "version":"FogMachineTimer v1.0"
 }
 ```
 
@@ -324,7 +324,7 @@ The firmware includes an on-demand SoftAP captive portal + OTA & remote control 
 
 1. Hold `#` until the progress bar fills to open the menu.
 2. Choose one of: `WiFi` (info), `QR` (dynamic Wi‑Fi QR), or `Rick` (fun static QR). These states start the SoftAP.
-3. The SoftAP SSID is `SmokeTimerAP` (open by default unless you add a password in code).
+3. The SoftAP SSID is `FogTimerAP` (open by default unless you add a password in code).
 4. Leaving those screens begins a ~30 s idle timer; when it expires the portal/AP stop (unless active operations like OTA are in progress).
 5. A separate menu item `WiFi En` toggles Wi‑Fi subsystem enable/disable (persisted). If disabled, entering Wi‑Fi screens will not start the AP.
 
@@ -376,7 +376,7 @@ Current combined JSON (includes preliminary STA fields):
   "wifiEnabled":1,
   "apIp":"192.168.4.1",
   "staStatus":"IDLE",
-  "version":"SmokeMachineTimer v1.0"
+  "version":"FogMachineTimer v1.0"
 }
 ```
 
@@ -427,7 +427,7 @@ The OLED shows a transient `NET` indicator for ~1.5 s after a remote update is a
 The `QR` menu renders a Wi‑Fi join QR with adaptive quiet zone to fit the 64‑pixel height. Payload pattern:
 
 ```text
-WIFI:T:WPA;S:SmokeTimerAP;P:<password>;;
+WIFI:T:WPA;S:FogTimerAP;P:<password>;;
 ```
 
 If password is empty, `T:nopass` is used. Adjust quiet zone or shorten SSID if scanning issues occur.

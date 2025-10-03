@@ -11,7 +11,12 @@ namespace HelpContent {
     "Edit: # next",
     "*: Cancel edit",
     "# hold exit",
-    "Saver sets blank"
+    "WiFi En toggle",
+    "WiFi Rst clears",
+    "POST /control",
+    "/api/timers",
+    "NET=remote set",
+    "OTA /update"
   };
 
   void Controller::enter() {

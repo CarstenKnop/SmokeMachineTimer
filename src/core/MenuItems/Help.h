@@ -3,7 +3,7 @@
 #include "../Buttons.h"
 
 namespace HelpContent {
-  static constexpr int LINES_COUNT = 10;
+  static constexpr int LINES_COUNT = 15; // updated: WiFi toggles, /control, timers API, NET indicator, OTA
   static constexpr const char* NAME = "Help";
   extern const char* const LINES[LINES_COUNT];
   inline const char* line(int i){ return (i>=0 && i<LINES_COUNT) ? LINES[i] : ""; }

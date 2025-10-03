@@ -1,6 +1,28 @@
 #ifndef ARDUINO
 #define F(x) x
 #endif
+// Ensure Arduino types before using uint8_t/int16_t
+#include <Arduino.h>
+#include <pgmspace.h>
+#include "DisplayManager.h"
+#include "RickRollQrBitmap.h"
+// Simple 12x8 monochrome icons (packed 1 byte per row, 12 LSB used) rough symbolic representations
+const uint8_t DisplayManager::ICON_WIFI_AP[] PROGMEM         = { 0x3F,0x21,0x21,0x3F,0x04,0x0E,0x0E,0x04 }; // AP box + antenna
+const uint8_t DisplayManager::ICON_WIFI_STA[] PROGMEM        = { 0x00,0x0E,0x11,0x00,0x04,0x0E,0x1F,0x04 }; // WiFi arcs + dot
+const uint8_t DisplayManager::ICON_WIFI_DUAL[] PROGMEM       = { 0x3F,0x21,0x21,0x3F,0x0E,0x11,0x0E,0x04 }; // AP + STA combo
+const uint8_t DisplayManager::ICON_WIFI_SUPPRESSED[] PROGMEM = { 0x0E,0x11,0x15,0x15,0x11,0x0E,0x04,0x1F }; // STA with bar
+const uint8_t DisplayManager::ICON_WIFI_HOSTED[] PROGMEM     = { 0x3F,0x21,0x21,0x3F,0x1F,0x04,0x0E,0x04 }; // AP with host marker
+
+void DisplayManager::drawIcon(int16_t x, int16_t y, const uint8_t *bitmap, uint8_t w, uint8_t h) {
+    for (uint8_t row=0; row<h; ++row) {
+        uint8_t bits = pgm_read_byte(bitmap + row);
+        for (uint8_t col=0; col<w; ++col) {
+            if (bits & (1 << (w-1-col))) {
+                display.drawPixel(x+col, y+row, SSD1306_WHITE);
+            }
+        }
+    }
+}
 
 // WiFi QR implementation notes:
 // We generate a standards-compatible Wi-Fi join payload of the form
@@ -13,8 +35,10 @@
 // 2 modules due to 64px display height constraints; empirically phones are
 // tolerant. If scanning proves unreliable, increase quiet to 3 and/or reduce
 // title/header space.
-#include "DisplayManager.h"
+// (includes moved earlier)
 #include <cstring>
+extern unsigned long netSetFlashUntil; // defined in main.cpp
+extern unsigned long staFlashUntil; // station connect indicator window
 
 void DisplayManager::begin() {
     #if defined(QR_DUMP_SERIAL)
@@ -40,10 +64,51 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
             if (relayOn) { display.setTextSize(2); display.setTextColor(WHITE,BLACK); display.setCursor(0,48); display.print('*'); }
             printTimerValue(currentTimerTenths, 48, "TIME", 255, false, false, false);
         }
+        if (!timerCtl.inEdit()) {
+            unsigned long nowMs = millis();
+            if (nowMs < netSetFlashUntil) {
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK); display.setCursor(100,0); display.print(F("NET"));
+            } else if (nowMs < staFlashUntil) {
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK); display.setCursor(100,0); display.print(F("STA"));
+            }
+        }
+        bool drewStatusChar=false;
         if (timerCtl.inEdit() && timerCtl.timersDirty) {
-            display.setTextSize(2); display.setCursor(0,0); display.setTextColor(WHITE,BLACK); display.print('!');
+            display.setTextSize(2); display.setCursor(0,0); display.setTextColor(WHITE,BLACK); display.print('!'); drewStatusChar=true;
         } else if (!timerCtl.inEdit() && (menu.getState()==MenuSystem::State::PROGRESS || menu.getState()==MenuSystem::State::SELECT || menu.getState()==MenuSystem::State::RESULT || menu.showMenuHint())) {
-            display.setTextSize(2); display.setCursor(0,0); display.setTextColor(WHITE,BLACK); display.print('M');
+            display.setTextSize(2); display.setCursor(0,0); display.setTextColor(WHITE,BLACK); display.print('M'); drewStatusChar=true;
+        }
+        // Connectivity indicator (single char) if space not used
+        if (!drewStatusChar) {
+            // Advanced connectivity glyph logic using provided ConnectivityStatus snapshot.
+            // Legend:
+            //  W = STA connected & AP active (dual mode)
+            //  S = STA connected & AP suppressed (STA-only)
+            //  P = AP active only (no STA)
+            //  X = AP suppressed, STA not connected (trying / down)
+            //  A = AP forced always-on (override) & STA may/may not be connected (if connected shows as W)
+            if (conn.wifiEnabled) {
+                const uint8_t *icon = nullptr;
+                if (conn.staConnected && conn.apActive) icon = ICON_WIFI_DUAL;
+                else if (conn.staConnected && conn.apSuppressed) icon = ICON_WIFI_SUPPRESSED;
+                else if (!conn.staConnected && conn.apActive) icon = (config.get().apAlwaysOn? ICON_WIFI_HOSTED : ICON_WIFI_AP);
+                else if (!conn.staConnected && conn.apSuppressed) icon = ICON_WIFI_SUPPRESSED;
+                if (icon) {
+                    drawIcon(0,0, icon, 12,8);
+                    // Overlay small activity marker (2x2 square) at top-right if clients present or recent auth
+                    if (conn.apClients>0 || conn.recentAuth) {
+                        // Blink only when recentAuth; steady if only clients
+                        bool drawMarker=true;
+                        if (conn.recentAuth) {
+                            static unsigned long lastBlinkMs=0; static bool blinkOn=true;
+                            unsigned long nowB = millis();
+                            if (nowB - lastBlinkMs > 300) { blinkOn = !blinkOn; lastBlinkMs = nowB; }
+                            drawMarker = blinkOn;
+                        }
+                        if (drawMarker) display.fillRect(10,0,2,2,SSD1306_WHITE);
+                    }
+                }
+            }
         }
 
         // Draw bottom 1px progress bar during normal run (only when base screen visible and not editing)
@@ -82,8 +147,81 @@ void DisplayManager::render(const TimerController& timerCtl, const MenuSystem& m
             case MenuSystem::State::QR_DYN: drawDynQR(menu); break;
             case MenuSystem::State::RICK: drawRick(menu); break;
             case MenuSystem::State::HELP: drawHelp(menu); break;
+            case MenuSystem::State::INFO: drawInfo(menu); break;
+            case MenuSystem::State::WIFI_ENABLE_EDIT: {
+                display.clearDisplay();
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+                display.setCursor(0,0); display.print(F("WiFi Enable"));
+                display.setCursor(0,14); display.setTextSize(2);
+                display.print(menu.wifiEnableTempValue()?F("ON "):F("OFF"));
+                display.setTextSize(1); display.setCursor(0,48); display.print(F("Up/Down toggle"));
+                display.setCursor(0,56); display.print(F("#=save *=cancel"));
+                break; }
+            case MenuSystem::State::WIFI_AP_ALWAYS_EDIT: {
+                display.clearDisplay();
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+                display.setCursor(0,0); display.print(F("AP Always"));
+                display.setCursor(0,14); display.setTextSize(2);
+                display.print(menu.apAlwaysTempValue()?F("ON "):F("OFF"));
+                display.setTextSize(1); display.setCursor(0,48); display.print(F("Up/Down toggle"));
+                display.setCursor(0,56); display.print(F("#=save *=cancel"));
+                break; }
+            case MenuSystem::State::WIFI_RESET_CONFIRM: {
+                display.clearDisplay();
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+                display.setCursor(0,0);
+                display.print(F("Reset WiFi?"));
+                display.setCursor(0,12);
+                display.print(F("#=confirm"));
+                display.setCursor(0,24);
+                display.print(F("*=cancel"));
+                if (menu.wifiResetActionDone()) {
+                    display.setCursor(0,40); display.print(F("Done."));
+                }
+                break; }
+            case MenuSystem::State::WIFI_FORGET_CONFIRM: {
+                display.clearDisplay();
+                display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+                display.setCursor(0,0);
+                display.print(F("Forget STA?"));
+                display.setCursor(0,12);
+                display.print(F("#=confirm"));
+                display.setCursor(0,24);
+                display.print(F("*=cancel"));
+                if (menu.wifiForgetActionDone()) {
+                    display.setCursor(0,40); display.print(F("Done."));
+                }
+                break; }
+            case MenuSystem::State::WIFI_ENABLE_TOGGLE: {
+                display.clearDisplay(); display.setTextSize(1);
+                display.setCursor(0,0); display.print(F("WiFi Toggled"));
+                break; }
+            case MenuSystem::State::WIFI_AP_ALWAYS_TOGGLE: {
+                display.clearDisplay(); display.setTextSize(1);
+                display.setCursor(0,0); display.print(F("AP Always Tgl"));
+                break; }
         }
     display.display();
+}
+
+void DisplayManager::drawInfo(const MenuSystem& menu) {
+    (void)menu;
+    display.clearDisplay();
+    display.setTextSize(1); display.setTextColor(WHITE,BLACK);
+    int y=0;
+    display.setCursor(0,y);   display.print(F("WiFi:")); display.print(conn.wifiEnabled?F("EN"):F("DIS"));
+    y+=8; display.setCursor(0,y); display.print(F("AP:")); display.print(conn.apActive?F("UP"):F("--")); display.print('/'); display.print(conn.apSuppressed?F("S"):F("A"));
+    y+=8; display.setCursor(0,y); display.print(F("STA:")); display.print(conn.staConnected?F("OK"):F("--")); display.print(' '); display.print(conn.staRssi);
+    y+=8; display.setCursor(0,y); display.print(F("Cli:")); display.print(conn.apClients); display.print(' '); display.print(conn.recentAuth?F("A"):F("-"));
+    // Uptime in seconds (approx)
+    unsigned long up = millis()/1000UL; unsigned long um=up/60UL; unsigned long uh=um/60UL; unsigned long ud=uh/24UL;
+    y+=8; display.setCursor(0,y); display.print(F("Up:")); if (ud>0){display.print(ud);display.print('d');} display.print((uh%24)); display.print('h');
+    // Free heap (ESP specific) guarded by ifdef
+    #ifdef ESP32
+    y+=8; display.setCursor(0,y); display.print(F("Heap:")); display.print(ESP.getFreeHeap()/1024); display.print('K');
+    #endif
+    // Version on last line if space
+    if (y<=48) { y+=8; display.setCursor(0,y); display.print(F("Ver:")); display.print(Defaults::VERSION()); }
 }
 
 void DisplayManager::splash() {
@@ -171,116 +309,31 @@ void DisplayManager::drawHelp(const MenuSystem& menu) {
 void DisplayManager::drawRick(const MenuSystem& menu) {
     (void)menu;
     display.clearDisplay();
-    // QR-only layout (full screen for QR code)
     display.setTextSize(1); display.setTextColor(WHITE,BLACK);
-#ifdef QR_STATIC_TEST_MODE
-    // In static test mode we bypass WiFi service and render a fixed known URL (rickroll) to validate real-world scanning.
-    #ifdef QR_TEST_V1
-    const char* testPayload = "HELLO"; // Force very short payload to stay at version 1
-    #else
-    const char* testPayload = "https://youtu.be/dQw4w9WgXcQ"; // version 2 expected
-    #endif
-    if (strcmp(testPayload,lastQrPayload)!=0) {
-        strncpy(lastQrPayload,testPayload,sizeof(lastQrPayload));
-        // Prefer auto mask (-1); fallback to mask 0 if that somehow fails
-    #ifdef QR_TEST_V1
-        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 1, -1, false);
-        if (!qrValid) qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 1, 0, false);
-    #else
-        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, -1, false);
-        if (!qrValid) qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, 0, false);
-    #endif
-        lastQrSize = qrValid ? qrcodegen_getSize(qrBuffer) : 0;
-        lastScale = 2;
-        #if defined(QR_DUMP_ASCII)
-        if (qrValid) {
-            Serial.println(F("[QR-DUMP-BEGIN]"));
-            Serial.print(F("VER=")); Serial.print(lastQrSize==21?1:(lastQrSize==25?2:lastQrSize));
-            Serial.print(F(" SIZE=")); Serial.println(lastQrSize);
-            for(int y=0;y<lastQrSize;y++){
-                for(int x=0;x<lastQrSize;x++) Serial.print(qrcodegen_getModule(qrBuffer,x,y)?'#':'.');
-                Serial.println();
-            }
-            Serial.println(F("[QR-DUMP-END]"));
-        }
-        #endif
-    }
-#else
-    if (!wifi || !wifi->isStarted()) {
-        display.setCursor(0,0); display.print(F("Starting AP..."));
-        qrValid = false;
-        return;
-    }
-
-    // Rebuild QR only if payload changed
-    char payload[sizeof(lastQrPayload)];
-    buildWifiQrString(payload,sizeof(payload));
-    if (strcmp(payload,lastQrPayload)!=0) {
-        strncpy(lastQrPayload,payload,sizeof(lastQrPayload));
-        // Try ECC Medium first (more robust)
-        qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_MEDIUM, 1, 2, -1, false);
-        if (!qrValid) {
-            // Fallback to ECC Low for extra capacity
-            qrValid = qrcodegen_encodeText(lastQrPayload, qrTemp, qrBuffer, QR_ECC_LOW, 1, 2, -1, false);
-        }
-        lastQrSize = qrValid ? qrcodegen_getSize(qrBuffer) : 0;
-        lastScale = 2; // fixed module size
-    }
-#endif
-    if (!qrValid || lastQrSize==0) {
-        display.setCursor(0,0); display.print(F("QR too big"));
-        return;
-    }
-
-    const int scale = 2;
-    const int maxW = 128;
-    const int maxH = 64;
-    // Compute maximum quiet zone that fits vertically for given size/scale.
-    int maxQuietPossible = (maxH/scale - lastQrSize) / 2; // integer division
-    #ifdef QR_TEST_V1
-    // Try to use full quiet zone 4 if it fits for version 1 test
-    if ((lastQrSize + 8) * scale <= maxH) maxQuietPossible = 4;
-    #endif
-    if (maxQuietPossible > 4) maxQuietPossible = 4; // no spec need beyond 4
-    if (maxQuietPossible < 1) maxQuietPossible = 1; // at least 1 to separate edges
-    int quiet = maxQuietPossible; // pick largest that fits to maximize finder isolation
-    int totalModules = lastQrSize + 2*quiet;
-    int qrPix = totalModules * scale;
-    int fullLeft = (maxW - qrPix)/2; if (fullLeft<0) fullLeft=0;
-    int fullTop = (maxH - qrPix)/2; if (fullTop<0) fullTop=0;
-    int offX = fullLeft + quiet*scale;
-    int offY = fullTop + quiet*scale;
-    // Background: pure black outside, white square for quiet zone + code.
-    display.fillRect(0,0,128,64,BLACK);
-    display.fillRect(fullLeft, fullTop, qrPix, qrPix, WHITE);
-    for(int y=0;y<lastQrSize;++y){
-        for(int x=0;x<lastQrSize;++x){
-            if (qrcodegen_getModule(qrBuffer,x,y))
+    // Use static pre-generated bitmap for Rick-roll URL (Version 2, 25x25) with standard dark=black modules on white background.
+    const int modules = RICK_QR_SIZE; // 25
+    const int scale = 2; // each module 2x2 pixels
+    const int qrPix = modules * scale; // 50 pixels
+    const int quiet = 2 * scale; // simple fixed quiet zone (4px) around code
+    display.fillRect(0,0,128,64,BLACK); // full screen black
+    int fullW = qrPix + quiet*2;
+    int fullH = qrPix + quiet*2;
+    int left = (128 - fullW)/2; if (left<0) left=0;
+    int top  = (64 - fullH)/2; if (top<0) top=0;
+    // White background (quiet zone + code area)
+    display.fillRect(left, top, fullW, fullH, WHITE);
+    int offX = left + quiet;
+    int offY = top + quiet;
+    for (int y=0; y<modules; ++y) {
+        for (int x=0; x<modules; ++x) {
+            uint8_t v = pgm_read_byte(&RICK_QR_BITMAP[y * modules + x]);
+            if (v) {
                 display.fillRect(offX + x*scale, offY + y*scale, scale, scale, BLACK);
-        }
-    }
-    #ifdef QR_FORCE_FINDERS
-    // Redraw canonical finder patterns to correct any accidental format-bit overwrite (diagnostic fix)
-    auto drawFinderScaled = [&](int fx,int fy){
-        for(int dy=0; dy<7; ++dy){
-            for(int dx=0; dx<7; ++dx){
-                bool dark = (dx==0||dx==6||dy==0||dy==6|| (dx>=2&&dx<=4&&dy>=2&&dy<=4));
-                int gx = fx+dx; int gy = fy+dy; if (gx<0||gy<0||gx>=lastQrSize||gy>=lastQrSize) continue;
-                int px = offX + gx*scale; int py = offY + gy*scale;
-                // Paint background module first to remove any mask artifacts
-                display.fillRect(px,py,scale,scale, dark?BLACK:WHITE);
             }
         }
-    };
-    drawFinderScaled(0,0);
-    drawFinderScaled(lastQrSize-7,0);
-    drawFinderScaled(0,lastQrSize-7);
-    #endif
-    #ifdef QR_DEBUG_OUTLINE
-    // Draw a 1px outline just outside quiet zone for diagnostic framing
-    display.drawRect(fullLeft-1, fullTop-1, qrPix+2, qrPix+2, WHITE);
-    #endif
-    // (Removed border rectangle to preserve clean quiet zone)
+    }
+    // Optional outline for diagnostics (commented)
+    // display.drawRect(left-1, top-1, fullW+2, fullH+2, WHITE);
 }
 
 void DisplayManager::drawDynQR(const MenuSystem& menu) {
@@ -308,12 +361,13 @@ void DisplayManager::drawWiFiInfo(const MenuSystem& menu) {
     (void)menu;
     display.clearDisplay();
     display.setTextSize(1); display.setTextColor(WHITE,BLACK);
-    if (!wifi || !wifi->isStarted()) { display.setCursor(0,0); display.print(F("WiFi not started")); return; }
+    if (!wifi || !wifi->isStarted()) { display.setCursor(0,0); display.print(F("WiFi off (toggle)")); return; }
     const char* ssid = wifi->getSSID();
     const char* pass = wifi->getPass();
-    display.setCursor(0,0); display.print(F("SSID:")); display.setCursor(0,8); display.print(ssid);
-    display.setCursor(0,24); display.print(F("PASS:")); display.setCursor(0,32); if(pass && *pass) display.print(pass); else display.print(F("<open>"));
-    // Removed back hint per request (navigation still via # or * )
+    display.setCursor(0,0); display.print(F("AP SSID:")); display.setCursor(0,8); display.print(ssid);
+    display.setCursor(0,18); display.print(F("AP PASS:")); display.setCursor(0,26); if(pass && *pass) display.print(pass); else display.print(F("<open>"));
+    // Space for STA info if available via future injection (placeholder lines)
+    display.setCursor(0,40); display.print(F("#/* back"));
 }
 void DisplayManager::escapeAppend(char c, char *&w, size_t &remain) {
     if (c=='\\' || c==';' || c==',' || c==':' || c=='"') {

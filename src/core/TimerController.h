@@ -12,6 +12,7 @@ public:
   void tick(unsigned long now);
   void resetCycle();
   void toggleRelayManual();
+  void reloadFromConfig(const Config::Values& v); // new helper to apply updated times
 
   uint32_t currentTimer() const { return timer; }
   bool isRelayOn() const { return relayState; }

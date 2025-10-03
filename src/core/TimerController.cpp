@@ -110,3 +110,14 @@ void TimerController::exitEdit(bool changed) {
         timersDirty=true;
     }
 }
+
+void TimerController::reloadFromConfig(const Config::Values& v) {
+    if (!cfg) return;
+    // Update pointed values (cfg already points to Config::Values inside Config)
+    // We assume 'v' is the same struct; just ensure timing logic restarts cleanly.
+    (void)v; // values already in cfg memory region
+    // Restart current phase to make change immediate and deterministic
+    relayState = false; // begin with OFF phase
+    timer = 0;
+    lastTickMs = millis();
+}

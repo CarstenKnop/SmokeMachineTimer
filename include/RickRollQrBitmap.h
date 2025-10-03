@@ -6,5 +6,7 @@
 
 #include <stdint.h>
 
+#include <pgmspace.h>
 #define RICK_QR_SIZE 25
-extern const uint8_t RICK_QR_BITMAP[RICK_QR_SIZE][RICK_QR_SIZE];
+// Stored in flash (PROGMEM) as a flat row-major array length RICK_QR_SIZE*RICK_QR_SIZE
+extern const uint8_t RICK_QR_BITMAP[] PROGMEM;

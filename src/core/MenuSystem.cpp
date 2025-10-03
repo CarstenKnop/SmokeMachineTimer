@@ -40,12 +40,17 @@ bool MenuSystem::handleSelect(const ButtonState& bs, unsigned long now, Config& 
     if (bs.starEdge) { state = State::INACTIVE; return true; }
     if (bs.hashEdge) {
         selectedMenu = menuIndex;
-        switch(selectedMenu) {
+    switch(selectedMenu) {
             case 0: beginSaverEdit(config.get().screensaverDelaySec); break;
             case 1: state = State::WIFI_INFO; break;
             case 2: state = State::QR_DYN; break;
             case 3: state = State::RICK; break;
-            case 4: enterHelp(); break;
+            case 4: beginWifiEnableEdit(config.get().wifiEnabled); break; // interactive ON/OFF
+            case 5: state = State::WIFI_RESET_CONFIRM; menuResultStart = now; break;
+            case 6: state = State::WIFI_FORGET_CONFIRM; menuResultStart = now; break;
+            case 7: beginApAlwaysEdit(config.get().apAlwaysOn); break;
+            case 8: state = State::INFO; break;
+            case 9: enterHelp(); break;
             default: state = State::RESULT; menuResultStart = now; break;
         }
         return true;
@@ -138,7 +143,34 @@ void MenuSystem::processInput(const ButtonState& bs, unsigned long now, Config& 
                 if (bs.hashEdge || bs.starEdge) { state = State::SELECT; }
                 break;
             case State::RESULT:
-                if (bs.hashEdge || bs.starEdge) { state = State::INACTIVE; }
+            case State::WIFI_ENABLE_TOGGLE:
+            case State::WIFI_RESET_CONFIRM:
+            case State::WIFI_FORGET_CONFIRM:
+            case State::WIFI_AP_ALWAYS_TOGGLE:
+                if (state==State::WIFI_RESET_CONFIRM) {
+                    if (bs.hashEdge && !wifiResetDone) { wifiResetDone=true; }
+                    if (bs.starEdge) { state = State::SELECT; wifiResetDone=false; }
+                    else if (wifiResetDone && (bs.hashEdge || bs.starEdge)) { state = State::INACTIVE; wifiResetDone=false; }
+                } else if (state==State::WIFI_FORGET_CONFIRM) {
+                    if (bs.hashEdge && !wifiForgetDone) { wifiForgetDone=true; }
+                    if (bs.starEdge) { state = State::SELECT; wifiForgetDone=false; }
+                    else if (wifiForgetDone && (bs.hashEdge || bs.starEdge)) { state = State::INACTIVE; wifiForgetDone=false; }
+                } else {
+                    if (bs.hashEdge || bs.starEdge) { state = State::INACTIVE; }
+                }
+                break;
+            case State::WIFI_ENABLE_EDIT:
+                if (bs.upEdge || bs.downEdge) { toggleWifiEnableTemp(); }
+                if (bs.starEdge) { state = State::SELECT; }
+                if (bs.hashEdge) { state = State::WIFI_ENABLE_TOGGLE; menuResultStart = now; }
+                break;
+            case State::WIFI_AP_ALWAYS_EDIT:
+                if (bs.upEdge || bs.downEdge) { toggleApAlwaysTemp(); }
+                if (bs.starEdge) { state = State::SELECT; }
+                if (bs.hashEdge) { state = State::WIFI_AP_ALWAYS_TOGGLE; menuResultStart = now; }
+                break;
+            case State::INFO:
+                if (bs.hashEdge || bs.starEdge) { state = State::SELECT; }
                 break;
             case State::PROGRESS:
             case State::INACTIVE:

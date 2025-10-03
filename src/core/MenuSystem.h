@@ -7,10 +7,16 @@
 #include "Screensaver.h"
 #include "MenuItems/Help.h"
 #include "MenuItems/Saver.h"
+#include "MenuItems/WiFiEnableToggle.h"
+#include "MenuItems/WiFiResetConfirm.h"
+#include "MenuItems/WiFiForgetConfirm.h"
+#include "MenuItems/WiFiApAlwaysToggle.h"
 
 class MenuSystem {
 public:
-  enum class State : uint8_t { INACTIVE, PROGRESS, SELECT, RESULT, SAVER_EDIT, WIFI_INFO, QR_DYN, RICK, HELP };
+  enum class State : uint8_t { INACTIVE, PROGRESS, SELECT, RESULT, SAVER_EDIT, WIFI_INFO, QR_DYN, RICK, HELP, INFO,
+    WIFI_ENABLE_TOGGLE, WIFI_RESET_CONFIRM, WIFI_FORGET_CONFIRM, WIFI_AP_ALWAYS_TOGGLE,
+    WIFI_ENABLE_EDIT, WIFI_AP_ALWAYS_EDIT };
 
   void begin();
 
@@ -54,14 +60,19 @@ public:
   bool progressFull(unsigned long now) const;
 
   // Dynamic menu: currently two items (Saver, Help); can expand later
-  int getMenuCount() const { return 5; }
+  int getMenuCount() const { return 10; }
   const char* getMenuName(int idx) const {
     switch(idx) {
       case 0: return SaverMenu::NAME;
-      case 1: return "WiFi";        // info screen
-      case 2: return "QR";          // dynamic Wi-Fi QR
-      case 3: return "Rick";        // static Rickroll QR
-      case 4: return HelpContent::NAME;
+      case 1: return "WiFi";                  // info screen
+      case 2: return "QR";                    // dynamic Wi-Fi QR
+      case 3: return "Rick";                  // static Rickroll QR
+      case 4: return MenuItem::WiFiEnableToggle::NAME;
+      case 5: return MenuItem::WiFiResetConfirm::NAME;
+      case 6: return MenuItem::WiFiForgetConfirm::NAME;
+      case 7: return MenuItem::WiFiApAlwaysToggle::NAME;
+  case 8: return "Info";
+  case 9: return HelpContent::NAME;
       default: return "";
     }
   }
@@ -78,6 +89,17 @@ public:
   void enterHelp(); // delegates to help controller
   void processInput(const ButtonState& bs, unsigned long now, Config& config, Screensaver& saver); // unified button handling
   void updateHelpAnimation(unsigned long now); // delegates to help controller
+  // WiFi destructive action helpers
+  bool wifiResetActionDone() const { return wifiResetDone; }
+  bool wifiForgetActionDone() const { return wifiForgetDone; }
+  bool inWifiEnableEdit() const { return state == State::WIFI_ENABLE_EDIT; }
+  bool inApAlwaysEdit() const { return state == State::WIFI_AP_ALWAYS_EDIT; }
+  void beginWifiEnableEdit(bool current) { wifiEnableTemp = current; state = State::WIFI_ENABLE_EDIT; }
+  void beginApAlwaysEdit(bool current) { apAlwaysTemp = current; state = State::WIFI_AP_ALWAYS_EDIT; }
+  bool wifiEnableTempValue() const { return wifiEnableTemp; }
+  bool apAlwaysTempValue() const { return apAlwaysTemp; }
+  void toggleWifiEnableTemp() { wifiEnableTemp = !wifiEnableTemp; }
+  void toggleApAlwaysTemp() { apAlwaysTemp = !apAlwaysTemp; }
 
 private:
   void enterSelect(unsigned long now);
@@ -97,4 +119,9 @@ private:
   // Help controller
   HelpContent::Controller helpCtrl;
   // Help data moved to HelpContent namespace (MenuItems/Help.*)
+  // WiFi confirmation state flags
+  bool wifiResetDone=false;
+  bool wifiForgetDone=false;
+  bool wifiEnableTemp=false;
+  bool apAlwaysTemp=false;
 };

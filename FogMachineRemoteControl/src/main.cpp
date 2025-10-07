@@ -17,5 +17,6 @@ void setup() {
 void loop() {
   master.scanAndPing();
   ui.loop();
+  disp.render(master, ui);
   delay(200);
 }

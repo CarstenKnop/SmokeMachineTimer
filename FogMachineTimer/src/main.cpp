@@ -22,6 +22,16 @@ static uint8_t getBatteryPercent() {
 static Config config;
 static TimerController timerCtl;
 
+static void ensurePeer(const uint8_t *mac) {
+  if (!esp_now_is_peer_exist(mac)) {
+    esp_now_peer_info_t info = {};
+    memcpy(info.peer_addr, mac, 6);
+    info.channel = 0;
+    info.encrypt = false;
+    esp_now_add_peer(&info);
+  }
+}
+
 void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   if (len < (int)sizeof(ESPNowMsg)) return;
   ESPNowMsg msg; memcpy(&msg, incomingData, sizeof(msg));
@@ -31,28 +41,32 @@ void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     reply.type = (uint8_t)MsgType::STATUS;
     reply.offTime = config.get().offTime; reply.onTime = config.get().onTime;
     strncpy(reply.name, config.get().deviceName, sizeof(reply.name)-1);
-  reply.batteryPercent = getBatteryPercent();
+    reply.batteryPercent = getBatteryPercent();
+    ensurePeer(mac);
     esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
   } else if (msg.type == (uint8_t)MsgType::SET_PARAMS) {
     config.get().offTime = msg.offTime; config.get().onTime = msg.onTime;
     timerCtl.setTimes(msg.offTime, msg.onTime);
     ESPNowMsg reply = {};
     reply.type = (uint8_t)MsgType::STATUS; reply.offTime = config.get().offTime; reply.onTime = config.get().onTime; strncpy(reply.name, config.get().deviceName, sizeof(reply.name)-1);
-  reply.batteryPercent = getBatteryPercent();
+    reply.batteryPercent = getBatteryPercent();
+    ensurePeer(mac);
     esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
   } else if (msg.type == (uint8_t)MsgType::SAVE) {
     config.saveTimersIfChanged(config.get().offTime, config.get().onTime, true);
     ESPNowMsg reply = {};
     reply.type = (uint8_t)MsgType::STATUS; reply.offTime = config.get().offTime; reply.onTime = config.get().onTime; strncpy(reply.name, config.get().deviceName, sizeof(reply.name)-1);
-  reply.batteryPercent = getBatteryPercent();
-  esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
+    reply.batteryPercent = getBatteryPercent();
+    ensurePeer(mac);
+    esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
   } else if (msg.type == (uint8_t)MsgType::PING) {
     ESPNowMsg reply = {};
     reply.type = (uint8_t)MsgType::PONG;
     reply.offTime = config.get().offTime; reply.onTime = config.get().onTime;
     strncpy(reply.name, config.get().deviceName, sizeof(reply.name)-1);
-  reply.batteryPercent = getBatteryPercent();
-  esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
+    reply.batteryPercent = getBatteryPercent();
+    ensurePeer(mac);
+    esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
   } else if (msg.type == (uint8_t)MsgType::CALIB) {
     // Save calibration ADC points sent from remote (raw ADC values)
     if (msg.calibAdc[0] || msg.calibAdc[1] || msg.calibAdc[2]) {
@@ -64,6 +78,7 @@ void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     strncpy(reply.name, config.get().deviceName, sizeof(reply.name)-1);
     reply.batteryPercent = getBatteryPercent();
     memcpy(reply.calibAdc, config.get().calibAdc, sizeof(reply.calibAdc));
+    ensurePeer(mac);
     esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
   }
 }

@@ -1,4 +1,5 @@
 #include "UI.h"
+#include "DisplayManager.h"
 #include <Arduino.h>
 
 void UI::begin(ESPNowMaster* m, DisplayManager* d) {
@@ -7,6 +8,12 @@ void UI::begin(ESPNowMaster* m, DisplayManager* d) {
 
 void UI::loop() {
   auto bs = buttons.poll();
+  lastButtons = bs;
+  if (bs.upEdge || bs.downEdge || bs.hashEdge || bs.starEdge) {
+    Serial.printf("BTN edges: U%u D%u # %u * %u\n", bs.upEdge, bs.downEdge, bs.hashEdge, bs.starEdge);
+  }
+  // pump master periodic tasks (discovery pings)
+  master->tick();
   if (state == State::LIST && serviceState == ServiceState::NONE) {
     // navigate list
     if (bs.upEdge) { if (selectedIndex>0) selectedIndex--; }
@@ -18,10 +25,11 @@ void UI::loop() {
       }
     }
     if (bs.starEdge) {
-      // pair with first discovered peer (quick-pair)
-      if (!master->peerList.empty()) {
-        auto &p = master->peerList[0]; char tmpName[24]; snprintf(tmpName, sizeof(tmpName), "Timer-%02X%02X", p.mac[4], p.mac[5]); master->pairWith(p.mac, tmpName); master->persistPeers();
-      }
+      // enter pairing mode (discovery scan)
+      state = State::PAIRING;
+      master->startDiscovery(12000);
+      selectedIndex = 0;
+      Serial.println("UI: Enter PAIRING mode");
     }
     // long-press star enters service CALIB mode
     static unsigned long starHoldStart = 0;
@@ -57,17 +65,38 @@ void UI::loop() {
         hashHoldStart = 0; state = State::LIST;
     } }
     if (!bs.hash) { hashHoldStart=0; }
+  } else if (state == State::PAIRING) {
+    // show discovered peers, select one to pair with
+    if (bs.upEdge) { if (selectedIndex > 0) selectedIndex--; }
+    if (bs.downEdge) { if (selectedIndex < (int)master->discoveredPeers.size() - 1) selectedIndex++; }
+    if (bs.hashEdge) {
+      // choose discovered peer -> go to EDIT_NAME
+      if (!master->discoveredPeers.empty() && selectedIndex < (int)master->discoveredPeers.size()) {
+        auto &p = master->discoveredPeers[selectedIndex];
+        memcpy(pendingMac, p.mac, 6); hasPendingMac = true;
+        snprintf(editName, sizeof(editName), "Timer-%02X%02X", p.mac[4], p.mac[5]);
+        state = State::EDIT_NAME;
+        Serial.printf("UI: Selected for pairing %02X:%02X:%02X:%02X:%02X:%02X\n", p.mac[0],p.mac[1],p.mac[2],p.mac[3],p.mac[4],p.mac[5]);
+      }
+    }
+    if (bs.starEdge) { // exit pairing mode
+      state = State::LIST;
+      Serial.println("UI: Exit PAIRING mode");
+    }
   } else if (state == State::EDIT_NAME) {
     // simple name editing: up/down cycle ASCII 32..90 for first char; hash to accept
     if (bs.upEdge) { char &c = editName[0]; if (c < 'Z') c++; else c='A'; }
     if (bs.downEdge) { char &c = editName[0]; if (c > 'A') c--; else c='Z'; }
     if (bs.hashEdge) {
-      // send PAIR with new name
-      if ((int)master->peerList.size() > selectedIndex) {
-        master->pairWith(master->peerList[selectedIndex].mac, editName);
+      // Confirm name -> PAIR
+      if (hasPendingMac) {
+        master->pairWith(pendingMac, editName);
+        master->addOrUpdatePeer(pendingMac, editName);
         master->persistPeers();
+        hasPendingMac = false;
+        state = State::LIST;
+        Serial.println("UI: Pair+Name committed");
       }
-      state = State::LIST;
     }
   }
   // Service mode: CALIB editor
@@ -86,5 +115,4 @@ void UI::loop() {
       serviceState = ServiceState::NONE;
     }
   }
-  disp->render(*master);
 }

@@ -1,0 +1,2 @@
+& 'C:\Users\Carsten.Knop\.platformio\penv\Scripts\pio.exe' run -d "z:\source\ESP32\SmokeMachineTimer\FogMachineTimer"
+& 'C:\Users\Carsten.Knop\.platformio\penv\Scripts\pio.exe' run -d "z:\source\ESP32\SmokeMachineTimer\FogMachineRemoteControl"

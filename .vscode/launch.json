@@ -11,38 +11,6 @@
         {
             "type": "platformio-debug",
             "request": "launch",
-            "name": "PIO Debug",
-            "executable": "X:/XIAO_ESP32C3/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
-            "projectEnvName": "seeed_xiao_esp32c3",
-            "toolchainBinDir": "C:/Users/carst/.platformio/packages/toolchain-riscv32-esp@8.4.0+2021r2-patch5/bin",
-            "internalConsoleOptions": "openOnSessionStart",
-            "preLaunchTask": {
-                "type": "PlatformIO",
-                "task": "Pre-Debug"
-            }
-        },
-        {
-            "type": "platformio-debug",
-            "request": "launch",
-            "name": "PIO Debug (skip Pre-Debug)",
-            "executable": "X:/XIAO_ESP32C3/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
-            "projectEnvName": "seeed_xiao_esp32c3",
-            "toolchainBinDir": "C:/Users/carst/.platformio/packages/toolchain-riscv32-esp@8.4.0+2021r2-patch5/bin",
-            "internalConsoleOptions": "openOnSessionStart"
-        },
-        {
-            "type": "platformio-debug",
-            "request": "launch",
-            "name": "PIO Debug (without uploading)",
-            "executable": "X:/XIAO_ESP32C3/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
-            "projectEnvName": "seeed_xiao_esp32c3",
-            "toolchainBinDir": "C:/Users/carst/.platformio/packages/toolchain-riscv32-esp@8.4.0+2021r2-patch5/bin",
-            "internalConsoleOptions": "openOnSessionStart",
-            "loadMode": "manual"
-        },
-        {
-            "type": "platformio-debug",
-            "request": "launch",
             "name": "PIO Debug FogMachineRemoteControl",
             "executable": "X:/XIAO_ESP32C3/SmokeMachineTimer/FogMachineRemoteControl/.pio/build/seeed_xiao_esp32c3/firmware.elf",
             "projectEnvName": "seeed_xiao_esp32c3",
@@ -57,6 +25,38 @@
             "projectEnvName": "seeed_xiao_esp32c3",
             "toolchainBinDir": "C:/Users/carst/.platformio/packages/toolchain-riscv32-esp@8.4.0+2021r2-patch5/bin",
             "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "type": "platformio-debug",
+            "request": "launch",
+            "name": "PIO Debug",
+            "executable": "Z:/source/ESP32/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
+            "projectEnvName": "seeed_xiao_esp32c3",
+            "toolchainBinDir": "C:/Users/Carsten.Knop/.platformio/packages/toolchain-riscv32-esp/bin",
+            "internalConsoleOptions": "openOnSessionStart",
+            "preLaunchTask": {
+                "type": "PlatformIO",
+                "task": "Pre-Debug"
+            }
+        },
+        {
+            "type": "platformio-debug",
+            "request": "launch",
+            "name": "PIO Debug (skip Pre-Debug)",
+            "executable": "Z:/source/ESP32/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
+            "projectEnvName": "seeed_xiao_esp32c3",
+            "toolchainBinDir": "C:/Users/Carsten.Knop/.platformio/packages/toolchain-riscv32-esp/bin",
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "type": "platformio-debug",
+            "request": "launch",
+            "name": "PIO Debug (without uploading)",
+            "executable": "Z:/source/ESP32/SmokeMachineTimer/.pio/build/seeed_xiao_esp32c3/firmware.elf",
+            "projectEnvName": "seeed_xiao_esp32c3",
+            "toolchainBinDir": "C:/Users/Carsten.Knop/.platformio/packages/toolchain-riscv32-esp/bin",
+            "internalConsoleOptions": "openOnSessionStart",
+            "loadMode": "manual"
         }
     ]
 }

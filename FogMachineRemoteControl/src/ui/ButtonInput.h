@@ -1,0 +1,38 @@
+// ButtonInput.h
+// Handles button polling and debouncing.
+#pragma once
+#include <Arduino.h>
+
+class ButtonInput {
+public:
+    ButtonInput(uint8_t upGpio, uint8_t downGpio, uint8_t hashGpio, uint8_t starGpio);
+    void begin();
+    void update();
+    bool upPressed() const { return edgeFlags[0]; }
+    bool downPressed() const { return edgeFlags[1]; }
+    bool leftPressed() const { return edgeFlags[2]; }   // legacy name for hash
+    bool rightPressed() const { return edgeFlags[3]; }  // legacy name for star
+    bool hashPressed() const { return edgeFlags[2]; }
+    bool starPressed() const { return edgeFlags[3]; }
+    bool hashLongPressed() const { return hashLongPressActive; }
+    unsigned long hashHoldDuration() const { return states[2] ? (millis() - hashPressStart) : 0; }
+    // Legacy right* methods retained but mapped to star for now (not used for menu)
+    bool rightLongPressed() const { return false; }
+    unsigned long rightHoldDuration() const { return 0; }
+    static constexpr unsigned long LONG_PRESS_MS = 800;
+    void dumpImmediateDebug() const; // optional
+    // Counters
+    uint32_t getPressCountUp() const { return pressEdges[0]; }
+    uint32_t getPressCountDown() const { return pressEdges[1]; }
+    uint32_t getPressCountHash() const { return pressEdges[2]; }
+    uint32_t getPressCountStar() const { return pressEdges[3]; }
+private:
+    uint8_t pins[4];
+    bool states[4];      // debounced current
+    bool rawLevels[4];   // last raw read (active low)
+    bool edgeFlags[4];   // true exactly in the cycle after a press edge
+    uint32_t pressEdges[4];
+    unsigned long stateSince[4];
+    unsigned long hashPressStart = 0;
+    bool hashLongPressActive = false;
+};

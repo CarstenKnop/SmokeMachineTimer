@@ -6,10 +6,10 @@
 // Explicit raw GPIO mappings (avoid ambiguity between Dn macros and raw numbers)
 // NOTE: The working reference project used raw 6/7 for I2C. We mirror that here.
 
-// Communication / status output (spec: remote output on D0 logical). If the board's D0 differs
-// from raw GPIO 0 update COMM_OUT_GPIO accordingly.
-static constexpr int COMM_OUT_GPIO = 0;   // adjust if board variant differs
-static constexpr int BAT_ADC_GPIO  = 1;   // battery divider input
+// Communication / status output LED moved to D3 = raw GPIO5 to avoid conflict with A0
+static constexpr int COMM_OUT_GPIO = 5;   // D3 -> raw GPIO5 on Seeed XIAO ESP32C3
+// Battery ADC on A0 = raw GPIO2
+static constexpr int BAT_ADC_GPIO  = 2;   // battery divider input (A0)
 
 // Primary I2C GPIO (from working project):
 static constexpr int OLED_SDA_GPIO_PRIMARY = 6;

@@ -10,7 +10,7 @@
 #include "config/DeviceConfig.h"
 #include "comm/EspNowComm.h"
 
-#define FOG_OUTPUT_PIN D0
+#define FOG_OUTPUT_PIN D3
 
 TimerController timer(FOG_OUTPUT_PIN);
 DeviceConfig config;
@@ -20,13 +20,8 @@ void setup() {
   Serial.begin(115200);
   config.begin();
   pinMode(FOG_OUTPUT_PIN, OUTPUT);
-  // Blink D0 output 3 times on startup
-  for (int i = 0; i < 3; ++i) {
-    digitalWrite(FOG_OUTPUT_PIN, HIGH);
-    delay(150);
-    digitalWrite(FOG_OUTPUT_PIN, LOW);
-    delay(150);
-  }
+  // Ensure output is OFF on startup (do not blink, this pin controls the fog relay)
+  digitalWrite(FOG_OUTPUT_PIN, LOW);
   timer.begin(config.getTon(), config.getToff());
   comm.begin();
   Serial.println("FogMachineTimer started.");

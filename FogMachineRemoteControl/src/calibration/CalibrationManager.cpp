@@ -4,7 +4,11 @@
 #include <EEPROM.h>
 
 CalibrationManager::CalibrationManager() {
-    calibAdc[0] = 2000; calibAdc[1] = 3000; calibAdc[2] = 3500;
+    // Defaults tuned for a simple divider targeting ~0-100% mapping on 12-bit ADC
+    // Adjust if your divider changes; these are conservative starting points.
+    calibAdc[0] = 1900;  // ~0%
+    calibAdc[1] = 2600;  // ~50%
+    calibAdc[2] = 3200;  // ~100%
 }
 
 void CalibrationManager::begin() {
@@ -12,7 +16,12 @@ void CalibrationManager::begin() {
 }
 
 void CalibrationManager::loadFromEEPROM() {
-    EEPROM.get(64, calibAdc);
+    uint16_t buf[3] = {0,0,0};
+    EEPROM.get(64, buf);
+    // If EEPROM is fresh/zeros, keep defaults.
+    if (buf[0] != 0 || buf[1] != 0 || buf[2] != 0) {
+        calibAdc[0] = buf[0]; calibAdc[1] = buf[1]; calibAdc[2] = buf[2];
+    }
 }
 
 void CalibrationManager::saveToEEPROM() {
@@ -36,4 +45,12 @@ uint8_t CalibrationManager::calculatePercent(uint16_t adcValue) const {
         return (uint8_t)(((adcValue - calibAdc[0]) * 50) / (calibAdc[1] - calibAdc[0]));
     }
     return (uint8_t)(50 + ((adcValue - calibAdc[1]) * 50) / (calibAdc[2] - calibAdc[1]));
+}
+
+void CalibrationManager::resetToDefaults() {
+    // Match constructor defaults
+    calibAdc[0] = 1900;
+    calibAdc[1] = 2600;
+    calibAdc[2] = 3200;
+    saveToEEPROM();
 }

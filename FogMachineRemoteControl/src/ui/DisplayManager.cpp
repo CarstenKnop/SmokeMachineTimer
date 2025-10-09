@@ -43,9 +43,9 @@ void DisplayManager::splash() {
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0,0);
-    display.println("FOG");
+    display.println("FogMachine");
     display.setTextSize(1);
-    display.println("Remote Ctrl");
+    display.println("Remote Control");
     display.println("v1");
     display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
     display.display();
@@ -243,8 +243,31 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
         display.setCursor(0,54); display.println("#=Activate  #L=Del *=Back"); return;
     } else if (menu.getMode() == MenuSystem::Mode::RENAME_DEVICE) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Rename Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println(menu.renameEditing()?"Up/Down A-Z":"Press # to edit");
-        display.setCursor(0,26); display.println(menu.renameEditing()?"#=Save *=Cancel":"*=Back"); return;
+        if (!menu.renameEditing()) {
+            display.setCursor(0,14); display.println("Press # to edit");
+            display.setCursor(0,26); display.println("*=Back");
+            return;
+        } else {
+            // Show buffer with cursor underline at current pos
+            display.setCursor(0,14);
+            display.setTextSize(2);
+            const char* buf = menu.getRenameBuffer();
+            display.print(buf);
+            display.setTextSize(1);
+            // Draw caret under current position
+            int pos = menu.getRenamePos();
+            int x = pos * 12; int y = 32; display.drawLine(x, y, x+10, y, SSD1306_WHITE);
+            display.setCursor(0,48); display.setTextColor(SSD1306_WHITE); display.print("Up/Down change  #=Next  *=Back");
+            return;
+        }
+    } else if (menu.getMode() == MenuSystem::Mode::EDIT_NAME) {
+        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Edit Name"); display.drawLine(0,9,127,9,SSD1306_WHITE);
+        display.setCursor(0,14); display.setTextSize(2);
+        display.print(menu.getRenameBuffer());
+        display.setTextSize(1);
+        int pos = menu.getRenamePos(); int x = pos * 12; int y = 32; display.drawLine(x, y, x+10, y, SSD1306_WHITE);
+        display.setCursor(0,48); display.setTextColor(SSD1306_WHITE); display.print("Up/Down change  #=Next  *=Back");
+        return;
     } else if (menu.getMode() == MenuSystem::Mode::SELECT_ACTIVE) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Select Active"); display.drawLine(0,9,127,9,SSD1306_WHITE);
         int count = deviceMgr.getDeviceCount();
@@ -268,13 +291,54 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
         }
         display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
         display.setCursor(0,54); display.println("#=Set *=Back"); return;
+    } else if (menu.getMode() == MenuSystem::Mode::CONFIRM) {
+        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Confirm"); display.drawLine(0,9,127,9,SSD1306_WHITE);
+        const char* what = "";
+        auto act = menu.getConfirmAction();
+    if (act == MenuSystem::ConfirmAction::RESET_SLAVE) what = "Reset Timer?";
+        else if (act == MenuSystem::ConfirmAction::RESET_REMOTE) what = "Reset Remote?";
+        display.setCursor(0,24); display.println(what);
+        display.setCursor(0,54); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.println("#=Yes *=No");
+        return;
     } else if (menu.getMode() == MenuSystem::Mode::SHOW_RSSI) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("RSSI"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println("(No Data)"); display.setCursor(0,26); display.println("*=Back"); return;
+        // Header row: columns for Remote and Slave RSSI (no labels on rows to save space)
+        display.setCursor(2,10); display.setTextSize(1); display.print("Name  R  S");
+        int count = 0; int activeIdx = -1; if (auto *cm=CommManager::get()) { count = cm->getPairedCount(); if (cm->getActiveDevice()) activeIdx = cm->getActiveDevice() - &cm->getPaired(0); }
+        int first = menu.getRssiFirst(); if (first < 0) first = 0; if (first > count-1) first = count>0?count-1:0;
+        int maxRows = 4; // rows under header
+        for (int i=0;i<maxRows;i++) {
+            int idx = first + i; if (idx >= count) break;
+            const auto &d = CommManager::get()->getPaired(idx);
+            int y = 20 + i*11;
+            // Highlight active device with '*'
+            char name[10]; strncpy(name, d.name[0]?d.name:"(noname)", sizeof(name)-1); name[sizeof(name)-1]=0;
+            display.setCursor(2,y);
+            display.print((idx==activeIdx)?'*':' ');
+            display.print(name);
+            // Right side: Remote and Slave RSSI as integers
+            char rbuf[12]; snprintf(rbuf,sizeof(rbuf)," %d %d", (int)d.rssiRemote, (int)d.rssiSlave);
+            int x = 120 - (int)strlen(rbuf)*6; if (x < 64) x = 64; display.setCursor(x, y); display.print(rbuf);
+        }
+        display.setCursor(0,57); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.print("Up/Down scroll  *=Back");
+        return;
     } else if (menu.getMode() == MenuSystem::Mode::BATTERY_CALIB) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Battery Cal"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println(menu.batteryCalActive()?"In Progress":"Idle");
-        display.setCursor(0,26); display.println("#=Toggle *=Back"); return;
+        display.setCursor(0,14);
+        if (!menu.batteryCalActive()) { display.println("Press # to start"); display.setCursor(0,26); display.println("*=Back"); }
+        else {
+            // Simple three-point editor: A0 (0%), A50 (50%), A100 (100%)
+            int idx = menu.getEditCalibIndex();
+            display.print("A0:"); display.print(menu.getEditCalib(0)); display.print("  ");
+            display.print("A50:"); display.print(menu.getEditCalib(1)); display.print("  ");
+            display.print("A100:"); display.println(menu.getEditCalib(2));
+            // underline current
+            int underlineY = 22; int startX = idx==0?0:(idx==1?36:80); int endX = startX + 28;
+            display.drawLine(startX, underlineY, endX, underlineY, SSD1306_WHITE);
+            display.setCursor(0,32);
+            display.println("Up/Down chg  *=Next  #=Save");
+        }
+        return;
     } else {
         int start = menu.getVisibleStart();
         int lines = menu.getVisibleCount(5);

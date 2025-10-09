@@ -112,3 +112,16 @@ void DeviceManager::ensureActiveValid() {
     if (devices.empty()) { activeIndex = -1; return; }
     if (activeIndex < 0 || activeIndex >= (int)devices.size()) activeIndex = 0; // default to first
 }
+
+void DeviceManager::factoryReset() {
+    devices.clear();
+    activeIndex = -1;
+    // Persist cleared state
+    uint8_t zero = 0;
+    EEPROM.put(EEPROM_ADDR_COUNT, zero);
+    uint8_t inactive = 255; // -1 sentinel
+    EEPROM.put(EEPROM_ADDR_ACTIVE, inactive);
+    // Optionally clear device slots region (not strictly necessary)
+    // Keep it simple to avoid wear; just commit header changes
+    EEPROM.commit();
+}

@@ -35,6 +35,8 @@ public:
     const SlaveDevice* getActive() const;
     // Update status convenience
     void updateStatus(int index, const SlaveDevice& dev);
+    // Wipe all paired devices and reset active selection; persists to EEPROM
+    void factoryReset();
 private:
     void ensureActiveValid();
     std::vector<SlaveDevice> devices;

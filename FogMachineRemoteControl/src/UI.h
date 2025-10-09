@@ -1,5 +1,5 @@
 #pragma once
-#include "ESPNowMaster.h"
+// Legacy ESPNowMaster removed; UI kept only as a thin stub header if included elsewhere.
 #include "Buttons.h"
 
 class DisplayManager; // Forward declaration
@@ -7,14 +7,14 @@ class DisplayManager; // Forward declaration
 class UI {
 public:
   enum class State { LIST, PAIRING, EDIT_TIMES, EDIT_NAME };
-  void begin(ESPNowMaster* m, DisplayManager* d);
+  // Legacy begin signature removed. Kept for potential forward declarations in legacy code paths.
   void loop();
   State getState() const { return state; }
   int getSelectedIndex() const { return selectedIndex; }
   ButtonState getLastButtons() const { return lastButtons; }
   const char* getEditName() const { return editName; }
 private:
-  ESPNowMaster* master=nullptr;
+  // Legacy pointer removed.
   DisplayManager* disp=nullptr;
   Buttons buttons;
   State state = State::LIST;

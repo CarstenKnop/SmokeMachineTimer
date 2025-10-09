@@ -31,8 +31,10 @@ public:
     // Control commands for active device
     void resetActive();
     void toggleActive();
+    void overrideActive(bool on);
     void setActiveName(const char* newName);
     void setActiveTimer(float tonSec, float toffSec);
+    void factoryResetActive();
     // Device management helpers
     const SlaveDevice* getActiveDevice() const { return deviceManager.getActive(); }
     int getPairedCount() const { return deviceManager.getDeviceCount(); }

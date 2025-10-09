@@ -136,3 +136,7 @@ Select a device to Delete (un-pair).
                     |
                     +-----> [ Manage Devices ] -> Show paired list -> User selects device -> [ Rename / Delete ] -> Save -> Return to Menu
 
+7. Resets
+- Reset Timer: Factory reset the currently selected FogMachineTimer (slave). The remote sends a FACTORY_RESET command and requests status; the remote does not restart.
+- Reset Remote: Wipes the remote's paired devices and battery calibration and restarts the remote.
+

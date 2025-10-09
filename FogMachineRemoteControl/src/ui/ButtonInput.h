@@ -19,6 +19,7 @@ public:
     bool hashHeld() const { return states[2]; }
     bool upHeld() const { return states[0]; }
     bool downHeld() const { return states[1]; }
+    bool starHeld() const { return states[3]; }
     unsigned long hashHoldDuration() const { return states[2] ? (millis() - hashPressStart) : 0; }
     unsigned long hashPressStartTime() const { return states[2] ? hashPressStart : 0; }
     // Legacy right* methods retained but mapped to star for now (not used for menu)

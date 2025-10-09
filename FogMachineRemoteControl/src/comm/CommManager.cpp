@@ -50,6 +50,18 @@ void CommManager::toggleActive() {
     requestStatus(*act);
 }
 
+void CommManager::overrideActive(bool on) {
+    const SlaveDevice* act = deviceManager.getActive();
+    if (!act) return;
+    ProtocolMsg msg = {};
+    msg.cmd = (uint8_t)ProtocolCmd::OVERRIDE_OUTPUT;
+    msg.outputOverride = on;
+    ensurePeer(act->mac);
+    if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+    ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
+    esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
+}
+
 
 CommManager* CommManager::instance = nullptr;
 
@@ -265,5 +277,16 @@ void CommManager::setActiveTimer(float tonSec, float toffSec) {
     ensurePeer(act->mac);
     esp_err_t r = esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent SET_TIMER to %02X:%02X:%02X:%02X:%02X:%02X (%.1f/%.1f) (%d)\n", act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5], tonSec, toffSec, (int)r);
+    requestStatus(*act);
+}
+
+void CommManager::factoryResetActive() {
+    const SlaveDevice* act = deviceManager.getActive(); if (!act) return;
+    ProtocolMsg msg={}; msg.cmd = (uint8_t)ProtocolCmd::FACTORY_RESET;
+    ensurePeer(act->mac);
+    if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+    ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
+    esp_err_t r = esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
+    Serial.printf("[COMM] Sent FACTORY_RESET to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5], (int)r);
     requestStatus(*act);
 }

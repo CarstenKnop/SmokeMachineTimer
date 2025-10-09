@@ -32,7 +32,8 @@ public:
     bool justSelected() const { return lastSelectTime && (millis() - lastSelectTime < 400); }
     const char* getLastActionLabel() const { return lastActionLabel; }
     // Editing helpers / modes
-    enum class Mode { ROOT, EDIT_BLANKING, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS };
+    enum class Mode { ROOT, EDIT_BLANKING, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
+    enum class ConfirmAction { NONE, RESET_SLAVE, RESET_REMOTE };
     bool isEditing() const { return mode != Mode::ROOT; }
     bool isEditingBlanking() const { return mode == Mode::EDIT_BLANKING; }
     int getEditingBlankingSeconds() const { return blankingOptions[blankingIndex]; }
@@ -42,8 +43,15 @@ public:
     Mode getMode() const { return mode; }
     bool pairingActive() const { return mode == Mode::PAIRING && pairingScanning; }
     bool renameEditing() const { return mode == Mode::RENAME_DEVICE && renameInEdit; }
+    // Rename buffer access for rendering
+    const char* getRenameBuffer() const { return renameBuf; }
+    int getRenamePos() const { return renamePos; }
     bool batteryCalActive() const { return mode == Mode::BATTERY_CALIB && calibInProgress; }
     bool editingTimers() const { return mode == Mode::EDIT_TIMERS; }
+    bool editingName() const { return mode == Mode::EDIT_NAME; }
+    // RSSI list scroll state
+    int getRssiFirst() const { return rssiFirstIndex; }
+    void setRssiFirst(int v) { rssiFirstIndex = v; }
     // Selection animation helpers
     int getPrevSelectedIndex() const { return prevSelectedIndex; }
     unsigned long getLastSelectionChangeTime() const { return lastSelectionChangeTime; }
@@ -95,18 +103,32 @@ public:
     void setPairingSelection(int v) { pairingSelIndex = v; }
     int getActiveSelectIndex() const { return activeSelIndex; }
     bool consumeActiveSelect(int &outIndex) { if (!activeSelectTriggered) return false; activeSelectTriggered=false; outIndex=activeSelectIndexPending; return true; }
+    // Remote reset request (handled by main loop)
+    bool consumeRemoteReset() { bool v = remoteResetPending; remoteResetPending = false; return v; }
+    // Confirmation helpers
+    void enterConfirm(ConfirmAction a) { confirmAction = a; mode = Mode::CONFIRM; }
+    ConfirmAction getConfirmAction() const { return confirmAction; }
+    // Rename editing state
     bool renameInEdit = false;
-    bool calibInProgress = false;
+    char renameBuf[16] = {0};
+    int renamePos = 0; // index within renameBuf being edited
+    // moved to consolidated calibration state section below
     int getManageSelection() const { return manageSelIndex; }
     void setManageSelection(int v) { manageSelIndex = v; }
     // Mode entry helpers for other items
     void enterPairing();
     void enterManageDevices();
     void enterRename();
+    void enterEditName(const char* initialName);
     void enterSelectActive();
     void enterShowRssi();
     void enterBatteryCal();
     void enterEditTimers(float tonSecInit, float toffSecInit);
+    // Battery calibration helpers (UI state only)
+    void initBatteryCal(uint16_t a0, uint16_t a50, uint16_t a100) { editCalib[0]=a0; editCalib[1]=a50; editCalib[2]=a100; calibInitialized=true; editCalibIndex=0; }
+    bool consumeCalibSave(uint16_t out[3]) { if (!calibSavePending) return false; calibSavePending=false; out[0]=editCalib[0]; out[1]=editCalib[1]; out[2]=editCalib[2]; return true; }
+    uint16_t getEditCalib(int i) const { return (i>=0&&i<3)?editCalib[i]:0; }
+    int getEditCalibIndex() const { return editCalibIndex; }
     void startBlankingEdit();
     void cancelBlankingEdit();
     void confirmBlankingEdit(bool exitMenuAfter = false);
@@ -124,4 +146,16 @@ public:
     int getEditDigitIndex() const { return editDigitIndex; }
     int getEditToffTenths() const { return editToffTenths; }
     int getEditTonTenths() const { return editTonTenths; }
+    // Battery calibration UI state
+    bool calibInProgress = false;
+    bool calibInitialized = false;
+    bool calibSavePending = false;
+    uint16_t editCalib[3] = {0,0,0};
+    int editCalibIndex = 0; // 0..2
+    // RSSI list scroll pos
+    int rssiFirstIndex = 0;
+    // Remote reset pending flag
+    bool remoteResetPending = false;
+    // Confirmation state
+    ConfirmAction confirmAction = ConfirmAction::NONE;
 };

@@ -11,6 +11,8 @@ public:
     void load();
     void saveTimer(float ton, float toff);
     void saveName(const char* name);
+    void factoryReset();
+    bool isUninitialized() const;
     float getTon() const;
     float getToff() const;
     const char* getName() const;

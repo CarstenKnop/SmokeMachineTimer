@@ -12,6 +12,7 @@ public:
     void setCalibrationPoints(uint16_t adc0, uint16_t adc50, uint16_t adc100);
     void getCalibrationPoints(uint16_t& adc0, uint16_t& adc50, uint16_t& adc100) const;
     uint8_t calculatePercent(uint16_t adcValue) const;
+    void resetToDefaults();
 private:
     uint16_t calibAdc[3]; // 0%, 50%, 100%
 };

@@ -19,6 +19,8 @@ MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), sc
         {"Edit Timers"},
         {"Show RSSI"},
         {"Battery Calibration"},
+    {"Reset Timer"},
+        {"Reset Remote"},
         {"Display Blanking"}
     };
 }
@@ -60,7 +62,8 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             } else if (strcmp(label, "Manage Devices") == 0) {
                 enterManageDevices();
             } else if (strcmp(label, "Rename Device") == 0) {
-                enterRename();
+                const char* seed = "NAME"; if (auto *comm = CommManager::get()) { const SlaveDevice* act = comm->getActiveDevice(); if (act && act->name[0]) seed = act->name; }
+                enterEditName(seed);
             } else if (strcmp(label, "Select Active") == 0) {
                 enterSelectActive();
             } else if (strcmp(label, "Edit Timers") == 0) {
@@ -75,6 +78,10 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 enterShowRssi();
             } else if (strcmp(label, "Battery Calibration") == 0) {
                 enterBatteryCal();
+            } else if (strcmp(label, "Reset Timer") == 0) {
+                enterConfirm(ConfirmAction::RESET_SLAVE);
+            } else if (strcmp(label, "Reset Remote") == 0) {
+                enterConfirm(ConfirmAction::RESET_REMOTE);
             } else {
                 // unknown item -> stay
             }
@@ -150,21 +157,35 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             return;
         }
         if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::RENAME_DEVICE) {
-        static char tempName[16] = "";
-        if (!renameInEdit) {
-            // Enter edit on first hash
-            if (hashPressed) { renameInEdit = true; strncpy(tempName, "NAME", sizeof(tempName)-1); return; }
-            if (starPressed) { mode = Mode::ROOT; return; }
-        } else {
-            // Simple demo: edit first character cycling A-Z
-            if (upPressed) { if (tempName[0]==0) tempName[0]='A'; else { if (tempName[0]=='Z') tempName[0]='A'; else tempName[0]++; } }
-            if (downPressed){ if (tempName[0]==0) tempName[0]='Z'; else { if (tempName[0]=='A') tempName[0]='Z'; else tempName[0]--; } }
-            if (hashPressed) { // commit
-                auto *comm = CommManager::get(); if (comm) comm->setActiveName(tempName);
-                renameInEdit = false; mode = Mode::ROOT; return; }
-            if (starPressed) { renameInEdit = false; mode = Mode::ROOT; return; }
+    } else if (mode == Mode::EDIT_NAME) {
+        // Name editor: small font per-char editing, with hold-to-repeat like timers
+        auto *comm = CommManager::get();
+        unsigned long nowMs = millis();
+        static unsigned long nameHoldStartUp = 0, nameHoldStartDown = 0, nameLastRepeatMs = 0;
+        auto applyChar=[&](int dir){
+            char &ch = renameBuf[renamePos];
+            if (ch==0) ch='A';
+            if (dir>0) { if (ch=='Z') ch=' '; else if (ch==' ') ch='A'; else ch++; }
+            else { if (ch=='A') ch=' '; else if (ch==' ') ch='Z'; else ch--; }
+        };
+        if (upPressed)   { applyChar(+1); nameHoldStartUp = nowMs; nameLastRepeatMs = 0; return; }
+        if (downPressed) { applyChar(-1); nameHoldStartDown = nowMs; nameLastRepeatMs = 0; return; }
+        bool anyHeld=false; if (upHeld) { anyHeld=true; if (!nameHoldStartUp) nameHoldStartUp=nowMs; } else nameHoldStartUp=0; if (downHeld) { anyHeld=true; if (!nameHoldStartDown) nameHoldStartDown=nowMs; } else nameHoldStartDown=0;
+        if (anyHeld) {
+            unsigned long start = nameHoldStartUp ? nameHoldStartUp : nameHoldStartDown;
+            if (nowMs - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
+                if (nameLastRepeatMs==0 || (nowMs - nameLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
+                    if (upHeld) applyChar(+1); if (downHeld) applyChar(-1);
+                    nameLastRepeatMs = nowMs; return;
+                }
+            }
+        } else { nameLastRepeatMs = 0; }
+        if (hashPressed) {
+            if (renamePos < (int)sizeof(renameBuf)-2) { renamePos++; if (renameBuf[renamePos]==0) renameBuf[renamePos]='A'; return; }
+            if (comm) comm->setActiveName(renameBuf);
+            mode = Mode::ROOT; return;
         }
+        if (starPressed) { if (renamePos>0) { renameBuf[renamePos]=0; renamePos--; } else { mode = Mode::ROOT; } return; }
     } else if (mode == Mode::SELECT_ACTIVE) {
         // Navigate paired device list (DeviceManager consulted only for count via external code / DisplayManager)
         // We can't access DeviceManager directly here without coupling; we rely on main/Display to clamp.
@@ -183,10 +204,29 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
         }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::SHOW_RSSI) {
+        auto *comm = CommManager::get();
+        int count = comm ? comm->getPairedCount() : 0;
+        // Up/Down scroll list
+        if (upPressed) { if (rssiFirstIndex > 0) rssiFirstIndex--; }
+        if (downPressed) { if (rssiFirstIndex < (count>0?count-1:0)) rssiFirstIndex++; }
+        // '#' refresh all RSSI by requesting status from each paired device
+        if (hashPressed && comm) {
+            for (int i=0;i<comm->getPairedCount();++i) {
+                comm->requestStatus(comm->getPaired(i));
+            }
+        }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::BATTERY_CALIB) {
-        if (hashPressed) { calibInProgress = !calibInProgress; return; }
-        if (starPressed) { calibInProgress = false; mode = Mode::ROOT; return; }
+        // Initialize lazily when entering (main will seed values)
+        // Up/Down adjust current calibration point
+        if (upPressed) { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); }
+        if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); }
+        // '*' cycles index 0->1->2
+        if (starPressed) { editCalibIndex = (editCalibIndex + 1) % 3; }
+        // '#' saves
+        if (hashPressed) { calibSavePending = true; }
+        // Long-press hash can exit
+        if (hashLongPressed && !hashPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::EDIT_TIMERS) {
         // Edit two timer values in tenths: first TOFF digits [0..DIGITS-1], then TON digits [DIGITS..2*DIGITS-1]
         auto tweakDigit=[&](int &tenths, int whichDigit, int delta){
@@ -238,6 +278,19 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             return;
         }
         if (starPressed) { exitMenu(); return; }
+    } else if (mode == Mode::CONFIRM) {
+        if (hashPressed) {
+            if (confirmAction == ConfirmAction::RESET_SLAVE) {
+                if (auto *comm = CommManager::get()) comm->factoryResetActive();
+                exitMenu();
+                return;
+            } else if (confirmAction == ConfirmAction::RESET_REMOTE) {
+                remoteResetPending = true;
+                exitMenu();
+                return;
+            }
+        }
+        if (starPressed) { mode = Mode::ROOT; return; }
     }
     // Housekeeping: turn off scroll animation if elapsed
     if (scrollAnimActive && (millis() - scrollAnimStart >= SCROLL_ANIM_MS)) scrollAnimActive = false;
@@ -329,11 +382,25 @@ int MenuSystem::findBlankingIndexFor(int seconds) const {
 }
 
 // --- Other mode helpers ---
-void MenuSystem::enterPairing() { mode = Mode::PAIRING; pairingScanning = false; }
+void MenuSystem::enterPairing() {
+    mode = Mode::PAIRING;
+    pairingScanning = false;
+    pairingSelIndex = 0;
+    // Auto-start discovery for better UX
+    if (auto *comm = CommManager::get()) {
+        if (!comm->isDiscovering()) comm->startDiscovery();
+    }
+}
 void MenuSystem::enterManageDevices() { mode = Mode::MANAGE_DEVICES; }
 void MenuSystem::enterRename() { mode = Mode::RENAME_DEVICE; renameInEdit = false; }
+void MenuSystem::enterEditName(const char* initialName) {
+    inMenu = true; mode = Mode::EDIT_NAME; strncpy(renameBuf, initialName, sizeof(renameBuf)-1); renameBuf[sizeof(renameBuf)-1]=0; renamePos = 0;
+}
 void MenuSystem::enterSelectActive() { mode = Mode::SELECT_ACTIVE; }
-void MenuSystem::enterShowRssi() { mode = Mode::SHOW_RSSI; }
+void MenuSystem::enterShowRssi() {
+    mode = Mode::SHOW_RSSI;
+    if (auto *comm = CommManager::get()) comm->requestStatusActive();
+}
 void MenuSystem::enterBatteryCal() { mode = Mode::BATTERY_CALIB; calibInProgress = false; }
 void MenuSystem::enterEditTimers(float tonSecInit, float toffSecInit) {
     inMenu = true; // treat as a modal to capture input reliably

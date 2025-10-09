@@ -41,6 +41,8 @@ namespace Defaults {
   static constexpr unsigned long EDIT_REPEAT_INTERVAL_MS = 120;  // subsequent repeat cadence
   static constexpr unsigned long EDIT_BLINK_INTERVAL_MS  = 350;  // cursor blink
   static constexpr unsigned long MENU_FULL_BLINK_INTERVAL_MS = 400; // full-screen blink feedback
+  // Star button behavior: threshold to distinguish click vs hold (ms)
+  static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 200;
 
   // Post-action result/info timeout
   static constexpr unsigned long MENU_RESULT_TIMEOUT_MS = 5000;  // 5s message lifetime

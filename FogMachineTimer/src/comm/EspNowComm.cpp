@@ -84,6 +84,12 @@ void EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
             config.saveName(msg.name);
             sendStatus(mac);
             break;
+        case ProtocolCmd::FACTORY_RESET:
+            Serial.println("[SLAVE] FACTORY_RESET -> wiping EEPROM and restoring defaults");
+            config.factoryReset();
+            timer.setTimes(config.getTon(), config.getToff());
+            sendStatus(mac);
+            break;
         case ProtocolCmd::GET_RSSI:
             sendStatus(mac);
             break;

@@ -68,6 +68,8 @@ Legacy identifiers LEFT/RIGHT remain temporarily as aliases in code; new develop
     - Selecting active slave for main screen
     - Displaying paired slaves and RSSI (both as seen by remote and as reported by slave)
     - Battery calibration (menu item, guided 3-point calibration)
+    - Reset Timer (factory reset the selected FogMachineTimer)
+    - Reset Remote (wipe remote's paired devices and calibration, then restart)
     - Display blanking (with deep sleep)
     - Animated vertical text scrolling in menus and elswhere can be added if needed (displays like the menu animations when horizontally scrolling)
 - Main screen:

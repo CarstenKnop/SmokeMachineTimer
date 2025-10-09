@@ -26,11 +26,22 @@ public:
     // Status requests
     void requestStatus(const SlaveDevice& dev);
     void requestStatusActive();
+    // Control commands for active device
+    void resetActive();
+    void toggleActive();
+    void setActiveName(const char* newName);
+    // Device management helpers
+    const SlaveDevice* getActiveDevice() const { return deviceManager.getActive(); }
+    int getPairedCount() const { return deviceManager.getDeviceCount(); }
+    const SlaveDevice& getPaired(int i) const { return deviceManager.getDevice(i); }
+    void activateDeviceByIndex(int idx) { if (idx>=0 && idx<deviceManager.getDeviceCount()) { deviceManager.setActiveIndex(idx); requestStatus(deviceManager.getDevice(idx)); } }
+    void removeDeviceByIndex(int idx) { deviceManager.removeDevice(idx); }
     static CommManager* get() { return instance; }
 private:
     DeviceManager& deviceManager;
     static CommManager* instance;
     unsigned long ledBlinkUntil = 0;
+    void ensurePeer(const uint8_t mac[6]);
     // Discovery state
     bool discovering = false;
     uint32_t discoveryEnd = 0;
@@ -38,4 +49,8 @@ private:
     std::vector<DiscoveredDevice> discovered;
     void addOrUpdateDiscovered(const uint8_t mac[6], const char* name, int8_t rssi, float ton, float toff);
     void finishDiscovery();
+    // Status de-dup cache (per MAC tail match)
+    struct LastStatusCache { uint8_t mac[6]; float ton; float toff; bool state; unsigned long ts; };
+    std::vector<LastStatusCache> lastStatus;
+    bool isDuplicateStatus(const uint8_t mac[6], float ton, float toff, bool state, unsigned long now);
 };

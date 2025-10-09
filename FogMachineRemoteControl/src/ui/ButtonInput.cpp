@@ -49,6 +49,7 @@ void ButtonInput::update() {
                     if (i == 2) { // release resets long press state
                         hashPressStart = 0;
                         hashLongPressActive = false;
+                        hashReleaseTime = now;
                     }
                 }
             } else {

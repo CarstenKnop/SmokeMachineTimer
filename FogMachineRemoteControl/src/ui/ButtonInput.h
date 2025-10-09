@@ -2,6 +2,7 @@
 // Handles button polling and debouncing.
 #pragma once
 #include <Arduino.h>
+#include "Defaults.h"
 
 class ButtonInput {
 public:
@@ -15,11 +16,14 @@ public:
     bool hashPressed() const { return edgeFlags[2]; }
     bool starPressed() const { return edgeFlags[3]; }
     bool hashLongPressed() const { return hashLongPressActive; }
+    bool hashHeld() const { return states[2]; }
     unsigned long hashHoldDuration() const { return states[2] ? (millis() - hashPressStart) : 0; }
+    unsigned long hashPressStartTime() const { return states[2] ? hashPressStart : 0; }
     // Legacy right* methods retained but mapped to star for now (not used for menu)
     bool rightLongPressed() const { return false; }
     unsigned long rightHoldDuration() const { return 0; }
-    static constexpr unsigned long LONG_PRESS_MS = 800;
+    // Use Defaults for long-press threshold
+    static constexpr unsigned long LONG_PRESS_MS = Defaults::BUTTON_LONG_PRESS_MS;
     void dumpImmediateDebug() const; // optional
     // Counters
     uint32_t getPressCountUp() const { return pressEdges[0]; }
@@ -34,5 +38,8 @@ private:
     uint32_t pressEdges[4];
     unsigned long stateSince[4];
     unsigned long hashPressStart = 0;
+    unsigned long hashReleaseTime = 0;
     bool hashLongPressActive = false;
+public:
+    unsigned long hashLastReleaseTime() const { return hashReleaseTime; }
 };

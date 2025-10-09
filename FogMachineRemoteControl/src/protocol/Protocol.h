@@ -12,6 +12,7 @@ enum class ProtocolCmd : uint8_t {
     SET_NAME = 6,
     GET_RSSI = 7,
     CALIBRATE_BATTERY = 8
+    , TOGGLE_STATE = 9
 };
 
 struct __attribute__((packed)) ProtocolMsg {

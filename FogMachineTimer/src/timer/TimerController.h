@@ -11,6 +11,7 @@ public:
     void setTimes(float tonSeconds, float toffSeconds);
     void overrideOutput(bool on);
     void resetState();
+    void toggleAndReset();
     bool isOutputOn() const;
     float getTon() const;
     float getToff() const;

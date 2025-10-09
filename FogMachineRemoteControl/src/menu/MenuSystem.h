@@ -13,6 +13,7 @@ class MenuSystem {
 public:
     MenuSystem();
     void begin();
+    // Note: hashLongPressed is no longer used for menu entry gating; kept for internal edit flows if needed.
     void update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed);
     void enterMenu();
     void exitMenu();
@@ -58,11 +59,14 @@ private:
     int selectedIndex;
     bool inMenu;
     unsigned long menuEnterTime;
+    unsigned long menuExitTime = 0;
+public:
+    unsigned long getMenuExitTime() const { return menuExitTime; }
+private:
     int scrollOffset; // index of top visible item
     unsigned long lastNavTime;
     unsigned long lastSelectTime;
     const char* lastActionLabel = nullptr;
-    bool enteredHoldActive = false; // true while the initial long press that opened the menu remains held
     int prevSelectedIndex = 0; // for highlight animation
     unsigned long lastSelectionChangeTime = 0;
     int animScrollOffsetAtChange = 0; // disable animation if scroll offset changed mid-way
@@ -80,11 +84,20 @@ private:
     // Placeholder additional mode state
     bool pairingScanning = false;
     int pairingSelIndex = 0; // selection index in discovered list
+    // Active device selection state (for SELECT_ACTIVE mode)
+    int activeSelIndex = 0; // index navigating paired devices
+    bool activeSelectTriggered = false; // set true when user confirms selection
+    int activeSelectIndexPending = -1;  // which index was chosen
+    int manageSelIndex = 0; // selection inside Manage Devices
 public:
     int getPairingSelection() const { return pairingSelIndex; }
     void setPairingSelection(int v) { pairingSelIndex = v; }
+    int getActiveSelectIndex() const { return activeSelIndex; }
+    bool consumeActiveSelect(int &outIndex) { if (!activeSelectTriggered) return false; activeSelectTriggered=false; outIndex=activeSelectIndexPending; return true; }
     bool renameInEdit = false;
     bool calibInProgress = false;
+    int getManageSelection() const { return manageSelIndex; }
+    void setManageSelection(int v) { manageSelIndex = v; }
     // Mode entry helpers for other items
     void enterPairing();
     void enterManageDevices();

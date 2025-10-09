@@ -18,7 +18,7 @@ private:
     bool inited = false;
     void splash();
     void drawBatteryIndicator(uint8_t percent) const;
-    void drawMenu(const MenuSystem& menu) const;
+    void drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const;
     void drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const;
     void drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const;
 };

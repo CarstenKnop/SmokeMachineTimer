@@ -26,10 +26,7 @@ void MenuSystem::begin() {
 void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed) {
     if (!inMenu) return;
     unsigned long now = millis();
-    // Suppress interpreting the continuing long-press that opened the menu until released
-    if (enteredHoldActive) {
-        if (!hashLongPressed) enteredHoldActive = false; // user released '#' after entry
-    }
+    (void)hashLongPressed; // intentionally unused here
     if (mode == Mode::ROOT) {
         // ROOT MODE: list navigation
         if (upPressed) {
@@ -71,8 +68,8 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             }
             return;
         }
-        if (starPressed && !enteredHoldActive) { exitMenu(); return; }
-        // Long hash no longer exits while inside menu (reserved for selection only)
+    if (starPressed) { exitMenu(); return; }
+    // Long hash does not exit while inside menu; star is used for back
     } else if (mode == Mode::EDIT_BLANKING) {
         // EDITING DISPLAY BLANKING
         if (upPressed) {
@@ -121,18 +118,57 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
         }
         if (starPressed) { if (discovering && comm) comm->stopDiscovery(); mode = Mode::ROOT; return; }
     } else if (mode == Mode::MANAGE_DEVICES) {
+        // Manage Devices: Up/Down navigate paired device list
+        auto *comm = CommManager::get();
+        int count = comm ? comm->getPairedCount() : 0;
+        if (upPressed && count>0) { if (manageSelIndex>0) manageSelIndex--; else manageSelIndex = count-1; }
+        if (downPressed && count>0) { if (manageSelIndex < count-1) manageSelIndex++; else manageSelIndex = 0; }
+        if (hashPressed && count>0) {
+            // Short press: activate this device
+            comm->activateDeviceByIndex(manageSelIndex);
+            return;
+        }
+        // Long press hash to delete (if more than one device) – simple heuristic: detect if hashLongPressed and not just pressed
+        if (hashLongPressed && !hashPressed && count>0) {
+            if (count>1) {
+                comm->removeDeviceByIndex(manageSelIndex);
+                int newCount = comm->getPairedCount();
+                if (manageSelIndex >= newCount) manageSelIndex = newCount>0?newCount-1:0;
+            }
+            return;
+        }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::RENAME_DEVICE) {
-        if (hashPressed) { renameInEdit = !renameInEdit; return; }
-        if (starPressed) { renameInEdit = false; mode = Mode::ROOT; return; }
+        static char tempName[16] = "";
+        if (!renameInEdit) {
+            // Enter edit on first hash
+            if (hashPressed) { renameInEdit = true; strncpy(tempName, "NAME", sizeof(tempName)-1); return; }
+            if (starPressed) { mode = Mode::ROOT; return; }
+        } else {
+            // Simple demo: edit first character cycling A-Z
+            if (upPressed) { if (tempName[0]==0) tempName[0]='A'; else { if (tempName[0]=='Z') tempName[0]='A'; else tempName[0]++; } }
+            if (downPressed){ if (tempName[0]==0) tempName[0]='Z'; else { if (tempName[0]=='A') tempName[0]='Z'; else tempName[0]--; } }
+            if (hashPressed) { // commit
+                auto *comm = CommManager::get(); if (comm) comm->setActiveName(tempName);
+                renameInEdit = false; mode = Mode::ROOT; return; }
+            if (starPressed) { renameInEdit = false; mode = Mode::ROOT; return; }
+        }
     } else if (mode == Mode::SELECT_ACTIVE) {
-        if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::SELECT_ACTIVE) {
-        // Active device selection list
-        DeviceManager* dm = nullptr; // will be set via CommManager? (we access through singleton not yet; placeholder)
-        // navigation handled here via up/down using device count only when not scanning
-        // We will inject actual device list handling in DisplayManager rendering; logic minimal here.
-        if (hashPressed) { /* selection handled externally in DisplayManager / main for now */ return; }
+        // Navigate paired device list (DeviceManager consulted only for count via external code / DisplayManager)
+        // We can't access DeviceManager directly here without coupling; we rely on main/Display to clamp.
+        if (upPressed) {
+            if (activeSelIndex > 0) activeSelIndex--; else activeSelIndex = 0; // clamp; main may wrap if desired
+        }
+        if (downPressed) {
+            activeSelIndex++; // will be clamped externally if beyond count
+        }
+        if (hashPressed) {
+            // Trigger selection consumption in main loop
+            activeSelectTriggered = true;
+            activeSelectIndexPending = activeSelIndex;
+            exitMenu();
+            return;
+        }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::SHOW_RSSI) {
         if (starPressed) { mode = Mode::ROOT; return; }
@@ -148,7 +184,6 @@ void MenuSystem::enterMenu() {
     inMenu = true;
     menuEnterTime = millis();
     lastActionLabel = nullptr;
-    enteredHoldActive = true;
     mode = Mode::ROOT; // always start at root
     prevSelectedIndex = selectedIndex;
     lastSelectionChangeTime = millis();
@@ -158,6 +193,7 @@ void MenuSystem::enterMenu() {
 void MenuSystem::exitMenu() {
     inMenu = false;
     mode = Mode::ROOT; // reset to root
+    menuExitTime = millis();
 }
 
 void MenuSystem::nextItem() {

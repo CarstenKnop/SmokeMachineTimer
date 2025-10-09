@@ -28,6 +28,10 @@ namespace Defaults {
   static constexpr int DIGITS = 5;                    // 5 digits (XXXX.X)
 
   // Menu / UI timing
+  // Time user must hold '#' to trigger menu entry (long-press)
+  static constexpr unsigned long BUTTON_LONG_PRESS_MS = 800;
+  // Grace period before showing hold progress bar (prevents flicker for short taps)
+  static constexpr unsigned long MENU_HOLD_GRACE_MS = 250;
   static constexpr unsigned long MENU_PROGRESS_START_MS = 500;   // show hold progress after 0.5s
   static constexpr unsigned long MENU_PROGRESS_FULL_MS  = 3000;  // reach full bar at 3s
   static constexpr float MENU_SCROLL_SPEED = 5.0f;               // rows per second velocity

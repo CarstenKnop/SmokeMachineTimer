@@ -55,6 +55,14 @@ void TimerController::resetState() {
     digitalWrite(pin, LOW);
 }
 
+void TimerController::toggleAndReset() {
+    // Invert current state, reset timer baseline, resume normal cycling (no permanent override)
+    outputOverride = false; // ensure override not latched
+    outputState = !outputState;
+    lastSwitch = millis();
+    digitalWrite(pin, outputState ? HIGH : LOW);
+}
+
 bool TimerController::isOutputOn() const {
     return outputState;
 }

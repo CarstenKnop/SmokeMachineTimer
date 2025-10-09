@@ -4,6 +4,7 @@
 #include "DisplayManager.h"
 #include "ui/ButtonInput.h"
 #include "debug/DebugMetrics.h"
+#include "Defaults.h"
 #include "comm/CommManager.h"
 
 DisplayManager::DisplayManager() : display(128, 64, &Wire, -1) {}
@@ -66,17 +67,30 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
     display.clearDisplay();
 
     if (menu.isInMenu()) {
-        drawMenu(menu);
+        drawMenu(menu, deviceMgr);
     } else {
         // Battery indicator only on non-menu screens
         uint8_t batt = battery.getPercent();
         drawBatteryIndicator(batt);
         drawMainScreen(deviceMgr, battery);
-        // Show progress bar while right button held for menu entry
-        unsigned long holdMs = buttons.hashHoldDuration();
-        if (holdMs > 0 && holdMs < ButtonInput::LONG_PRESS_MS) {
-            drawProgressBar(holdMs, ButtonInput::LONG_PRESS_MS);
-            float pct = (float)holdMs / (float)ButtonInput::LONG_PRESS_MS;
+        // Show progress bar for long-press only after a grace period
+    unsigned long holdMs = buttons.hashHoldDuration();
+        unsigned long pressStart = buttons.hashPressStartTime();
+    unsigned long exitTime = menu.getMenuExitTime();
+    bool neverExited = (exitTime == 0);
+    // Require a post-exit release only if we've actually exited the menu before
+    bool releasedAfterExit = neverExited ? true : (buttons.hashLastReleaseTime() > exitTime);
+    // Hold must have started after exit (or simply started if never exited)
+    bool holdStartedAfterExit = (pressStart != 0) && (neverExited || (pressStart >= exitTime));
+    bool allowBar = releasedAfterExit && holdStartedAfterExit;
+    // Suppress for a grace period after exiting the menu to avoid visual blips
+    bool recentlyExitedMenu = (!neverExited) && ((millis() - exitTime) < Defaults::MENU_HOLD_GRACE_MS);
+        if (allowBar && !recentlyExitedMenu && holdMs >= Defaults::MENU_HOLD_GRACE_MS && holdMs < ButtonInput::LONG_PRESS_MS) {
+            // Reset progress origin to 0 at grace, so bar starts empty at that moment
+            unsigned long adjHold = holdMs - Defaults::MENU_HOLD_GRACE_MS;
+            unsigned long adjLong = ButtonInput::LONG_PRESS_MS - Defaults::MENU_HOLD_GRACE_MS;
+            drawProgressBar(adjHold, adjLong);
+            float pct = (float)adjHold / (float)adjLong;
             DebugMetrics::instance().recordProgress(pct);
         }
     }
@@ -109,7 +123,7 @@ void DisplayManager::drawBatteryIndicator(uint8_t percent) const {
     display.printf("%2u%%", percent);
 }
 
-void DisplayManager::drawMenu(const MenuSystem& menu) const {
+void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const {
     display.setTextSize(1);
     if (menu.isEditingBlanking()) {
         // Editing UI for Display Blanking
@@ -134,28 +148,25 @@ void DisplayManager::drawMenu(const MenuSystem& menu) const {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Pair Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
         auto *comm = CommManager::get();
         bool discovering = comm && comm->isDiscovering();
+        int count = (comm? comm->getDiscoveredCount():0);
+        int sel = menu.getPairingSelection(); if (sel >= count) sel = count>0?count-1:0;
+        int first = 0; if (sel >= 4) first = sel-3;
+        for (int i=0;i<4 && first+i<count;i++) {
+            const auto &d = comm->getDiscovered(first+i);
+            bool highlight = (first+i)==sel;
+            int y = 12 + i*12;
+            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);}                
+            display.setCursor(2,y);
+            char macBuf[18]; snprintf(macBuf,sizeof(macBuf),"%02X%02X%02X", d.mac[3],d.mac[4],d.mac[5]);
+            // Mark if already paired
+            bool already=false; for(int p=0;p<deviceMgr.getDeviceCount();++p){ if (memcmp(deviceMgr.getDevice(p).mac,d.mac,6)==0){already=true;break;} }
+            char line[32]; snprintf(line,sizeof(line),"%c%s %s",already?'*':' ', macBuf, d.name[0]?d.name:"(noname)");
+            display.print(line);
+        }
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
         if (discovering) {
-            display.setCursor(0,14); display.println("Scanning...");
-            if (comm) { display.setCursor(0,24); display.print("Found: "); display.print(comm->getDiscoveredCount()); }
-            display.setCursor(0,54); display.println("#=Stop *=Back");
-        } else if (comm && comm->getDiscoveredCount()>0) {
-            int count = comm->getDiscoveredCount();
-            int sel = menu.getPairingSelection();
-            if (sel >= count) sel = count-1;
-            // Show up to 4 entries
-            int first = 0; if (sel >= 4) first = sel-3;
-            for (int i=0;i<4 && first+i<count;i++) {
-                const auto &d = comm->getDiscovered(first+i);
-                bool highlight = (first+i)==sel;
-                int y = 12 + i*12;
-                if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);}                
-                display.setCursor(2,y);
-                char macBuf[18]; snprintf(macBuf,sizeof(macBuf),"%02X%02X%02X", d.mac[3],d.mac[4],d.mac[5]);
-                // Name (trim) + RSSI placeholder
-                char line[32]; snprintf(line,sizeof(line),"%s %s", macBuf, d.name[0]?d.name:"(noname)");
-                display.print(line);
-            }
-            display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            display.setCursor(0,54); display.print("#=Stop "); display.print("F:"); display.print(count); display.print(" *=Back");
+        } else if (count>0) {
             display.setCursor(0,54); display.println("#=Pair *=Back");
         } else {
             display.setCursor(0,14); display.println("Idle");
@@ -164,14 +175,49 @@ void DisplayManager::drawMenu(const MenuSystem& menu) const {
         return;
     } else if (menu.getMode() == MenuSystem::Mode::MANAGE_DEVICES) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Manage Devices"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println("(Not Impl)"); display.setCursor(0,26); display.println("*=Back"); return;
+        int count = deviceMgr.getDeviceCount();
+        if (count == 0) { display.setCursor(0,14); display.println("None"); display.setCursor(0,26); display.println("*=Back"); return; }
+        int sel = menu.getManageSelection(); if (sel >= count) sel = count-1;
+        int activeIdx = deviceMgr.getActiveIndex();
+        int first=0; if (sel>=4) first=sel-3;
+        for (int i=0;i<4 && first+i<count;i++) {
+            int idx=first+i; const auto &d = deviceMgr.getDevice(idx);
+            bool highlight = (idx==sel);
+            int y=12 + i*12;
+            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            display.setCursor(2,y);
+            char line[32]; snprintf(line,sizeof(line),"%c %s", idx==activeIdx?'*':' ', d.name[0]?d.name:"(noname)");
+            display.print(line);
+        }
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+        display.setCursor(0,54); display.println("#=Activate  #L=Del *=Back"); return;
     } else if (menu.getMode() == MenuSystem::Mode::RENAME_DEVICE) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Rename Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println(menu.renameEditing()?"Editing...":"Ready");
-        display.setCursor(0,26); display.println("#=Toggle *=Back"); return;
+        display.setCursor(0,14); display.println(menu.renameEditing()?"Up/Down A-Z":"Press # to edit");
+        display.setCursor(0,26); display.println(menu.renameEditing()?"#=Save *=Cancel":"*=Back"); return;
     } else if (menu.getMode() == MenuSystem::Mode::SELECT_ACTIVE) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Select Active"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14); display.println("(Placeholder)"); display.setCursor(0,26); display.println("*=Back"); return;
+        int count = deviceMgr.getDeviceCount();
+        if (count == 0) { display.setCursor(0,14); display.println("No devices"); display.setCursor(0,26); display.println("*=Back"); return; }
+        int sel = menu.getActiveSelectIndex();
+        if (sel >= count) sel = count-1; if (sel < 0) sel = 0; // clamp
+        int activeIdx = deviceMgr.getActiveIndex();
+        // show up to 4
+        int first = 0; if (sel >= 4) first = sel-3;
+        for (int i=0;i<4 && first+i<count;i++) {
+            int idx = first + i;
+            const auto &d = deviceMgr.getDevice(idx);
+            bool highlight = (idx==sel);
+            int y = 12 + i*12;
+            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);}                
+            display.setCursor(2,y);
+            char line[32];
+            // Prefix '*' for currently active device (even if not selection highlight)
+            snprintf(line,sizeof(line),"%c %s", (idx==activeIdx?'*':' '), d.name[0]?d.name:"(noname)");
+            display.print(line);
+        }
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+        display.setCursor(0,54); display.println("#=Set *=Back"); return;
     } else if (menu.getMode() == MenuSystem::Mode::SHOW_RSSI) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("RSSI"); display.drawLine(0,9,127,9,SSD1306_WHITE);
         display.setCursor(0,14); display.println("(No Data)"); display.setCursor(0,26); display.println("*=Back"); return;

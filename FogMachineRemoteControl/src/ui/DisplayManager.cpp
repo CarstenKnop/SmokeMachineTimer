@@ -1,5 +1,6 @@
 // DisplayManager.cpp
 // Handles OLED rendering, UI, and battery indicator.
+#include <Wire.h>
 #include "Pins.h"
 #include "DisplayManager.h"
 #include "ui/ButtonInput.h"
@@ -9,737 +10,111 @@
 
 DisplayManager::DisplayManager() : display(128, 64, &Wire, -1) {}
 
-void DisplayManager::begin() {
-    if (inited) return;
-    auto tryInit = [&](int sda, int scl)->bool {
-        Serial.printf("[DISPLAY] Trying I2C (raw GPIO) SDA=%d SCL=%d\n", sda, scl);
-        Wire.begin(sda, scl);
-        Wire.setClock(100000);
-        Wire.beginTransmission(0x3C);
-        if (Wire.endTransmission() != 0) {
-            Serial.println("[DISPLAY] Probe fail 0x3C");
-            return false;
-        }
-        if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-            Serial.println("[DISPLAY] display.begin fail");
-            return false;
-        }
-        selectedSda = sda; selectedScl = scl;
-        return true;
-    };
-    if (!tryInit(OLED_SDA_GPIO_PRIMARY, OLED_SCL_GPIO_PRIMARY)) {
-        Serial.println("[DISPLAY] Primary pins failed, scanning bus then trying alternate...");
-        for (uint8_t a=1;a<127;++a){ Wire.beginTransmission(a); if(Wire.endTransmission()==0) Serial.printf("[I2C] dev 0x%02X\n",a); }
-        if (!tryInit(OLED_SDA_GPIO_ALT, OLED_SCL_GPIO_ALT)) {
-            Serial.println("[DISPLAY][FATAL] Both pin sets failed.");
-            initFailed = true;
-            // Try to draw a big error message using default Wire to aid troubleshooting
-            display.clearDisplay();
-            display.setTextSize(1);
-            display.setTextColor(SSD1306_WHITE);
-            display.setCursor(0, 0); display.println("OLED/I2C not found");
-            display.setCursor(0, 12); display.println("Check wiring:");
-            display.setCursor(0, 22); display.println("SDA=D4 (GPIO6)");
-            display.setCursor(0, 32); display.println("SCL=D5 (GPIO7)");
-            display.setCursor(0, 44); display.println("Addr 0x3C");
-            display.display();
-            return;
-        }
-    }
-    inited = true;
-    if (!skipSplash) splash();
-    else lastWakeMs = millis();
-    // Optional charger inputs: use internal pulldown, but avoid clobbering I2C pins
-    if (CHARGER_CHG_PIN >= 0) { pinMode(CHARGER_CHG_PIN, INPUT_PULLDOWN); }
-    if (CHARGER_PWR_PIN >= 0) {
-        if (CHARGER_PWR_PIN == selectedScl || CHARGER_PWR_PIN == selectedSda) {
-            Serial.printf("[DISPLAY] Skipping PWR pin init on GPIO%d (conflicts with I2C)\n", CHARGER_PWR_PIN);
-        } else {
-            pinMode(CHARGER_PWR_PIN, INPUT_PULLDOWN);
-        }
-    }
+void DisplayManager::splash() {
+	display.clearDisplay();
+	display.setTextSize(1);
+	display.setTextColor(SSD1306_WHITE);
+	display.setCursor(0, 0);
+	display.println("FogMachine Remote");
+	display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+	display.setCursor(0, 20);
+	display.println(Defaults::VERSION());
+	display.display();
 }
 
-void DisplayManager::splash() {
-    if (!inited) return;
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
-    display.println("FogMachine");
-    display.setTextSize(1);
-    display.println("Remote Control");
-    display.println("v1");
-    display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-    display.display();
-    Serial.println("[DISPLAY] Splash drawn");
-    // Immediately show initial boot status line
-    drawBootStatus("Booting...");
-    delay(600);
-    display.invertDisplay(true);
-    delay(150);
-    display.invertDisplay(false);
-    // Seed wake timestamp so blanking countdown starts post-splash
-    lastWakeMs = millis();
+void DisplayManager::begin() {
+	// Try primary I2C pins first, then fallback
+	selectedSda = OLED_SDA_PIN;
+	selectedScl = OLED_SCL_PIN;
+	Wire.begin(selectedSda, selectedScl);
+	bool ok = display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false, false);
+	if (!ok) {
+		// Try alternate pins
+		selectedSda = OLED_SDA_PIN_ALT;
+		selectedScl = OLED_SCL_PIN_ALT;
+		Wire.begin(selectedSda, selectedScl);
+		ok = display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false, false);
+	}
+	if (!ok) {
+		initFailed = true;
+		inited = false;
+		return;
+	}
+	inited = true;
+	initFailed = false;
+	display.clearDisplay();
+	display.setRotation(Defaults::OLED_ROTATION);
+	if (!skipSplash) splash();
+	// Start unblanked
+	isBlanked = false;
+	lastWakeMs = millis();
 }
 
 void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu, const ButtonInput& buttons) {
-    // If display not initialized successfully, skip
-    if (!inited) return;
-    if (initFailed) { drawErrorScreen(); return; }
+	if (!inited) {
+		// If init failed, draw a minimal error panel repeatedly
+		if (initFailed) {
+			drawErrorScreen();
+		}
+		return;
+	}
 
-    static unsigned long lastFrame=0; unsigned long now=millis();
-    if (now - lastFrame < 50) return; // cap ~20 FPS
-    lastFrame = now;
-    unsigned long tStart = now;
-    // Wake/blank logic: any button activity (press or hold) wakes the display
-    if (buttons.upPressed() || buttons.downPressed() || buttons.hashPressed() || buttons.starPressed()
-        || buttons.upHeld() || buttons.downHeld() || buttons.hashHeld() || buttons.starHeld()) {
-        if (isBlanked) {
-            // Re-enable charge pump and turn on display
-            display.ssd1306_command(SSD1306_CHARGEPUMP);
-            display.ssd1306_command(0x14);
-            display.ssd1306_command(SSD1306_DISPLAYON);
-            isBlanked = false;
-        }
-        lastWakeMs = millis();
-    }
-    // If blanking is configured, enforce timeout
-    int blankSecs = menu.getAppliedBlankingSeconds();
-    if (blankSecs > 0) {
-        if (!isBlanked && lastWakeMs != 0 && (millis() - lastWakeMs) > (unsigned long)blankSecs * 1000UL) {
-            display.clearDisplay();
-            display.display();
-            // Turn off display and charge pump for lower OLED consumption
-            display.ssd1306_command(SSD1306_DISPLAYOFF);
-            display.ssd1306_command(SSD1306_CHARGEPUMP);
-            display.ssd1306_command(0x10);
-            isBlanked = true;
-        }
-    } else {
-        // Blanking disabled; ensure display is on
-        if (isBlanked) { display.ssd1306_command(SSD1306_DISPLAYON); isBlanked=false; }
-    }
-    if (isBlanked) {
-        // Skip rendering while blanked to save power
-        return;
-    }
+	// Apply contrast/brightness from menu (clamped in menu)
+	display.ssd1306_command(SSD1306_SETCONTRAST);
+	display.ssd1306_command(menu.getAppliedOledBrightness());
 
-    // Apply OLED contrast only when active
-    {
-        uint8_t contrast = menu.getAppliedOledBrightness();
-        if (contrast < 5) contrast = 5;
-        display.ssd1306_command(SSD1306_SETCONTRAST);
-        display.ssd1306_command(contrast);
-    }
+	// Wake on any interaction
+	bool anyActive = buttons.upHeld() || buttons.downHeld() || buttons.hashHeld() || buttons.starHeld() ||
+					 buttons.upPressed() || buttons.downPressed() || buttons.hashPressed() || buttons.starPressed();
+	if (anyActive) {
+		lastWakeMs = millis();
+		if (isBlanked) { isBlanked = false; display.ssd1306_command(SSD1306_DISPLAYON); }
+	}
+	// Handle auto-blanking based on applied seconds
+	int blankSecs = menu.getAppliedBlankingSeconds();
+	if (blankSecs > 0) {
+		unsigned long now = millis();
+		if (!isBlanked && (now - lastWakeMs) >= (unsigned long)blankSecs * 1000UL) {
+			isBlanked = true;
+			display.ssd1306_command(SSD1306_DISPLAYOFF);
+		}
+	} else {
+		// Blanking disabled
+		if (isBlanked) { isBlanked = false; display.ssd1306_command(SSD1306_DISPLAYON); }
+	}
+	if (isBlanked) {
+		// Nothing to draw while blanked
+		return;
+	}
 
-    display.clearDisplay();
+	// Draw frame
+	unsigned long tStart = millis();
+	display.clearDisplay();
+	// Battery indicator (top-left)
+	drawBatteryIndicator(battery.getPercent());
 
-    if (menu.isInMenu()) {
-        drawMenu(menu, deviceMgr);
-    } else {
-        // Battery indicator only on non-menu screens
-    uint8_t batt = battery.getPercent();
-    drawBatteryIndicator(batt);
-    drawMainScreen(deviceMgr, battery);
-        // If editing timers mode, draw an overlay similar to original with size-2 digits and labels
-        if (menu.editingTimers()) {
-            display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-            auto drawTimerRowEdit = [&](int tenths, int y, const char* label, int startDigit, bool highlight){
-                char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
-                display.setTextSize(2);
-                int startX=26; int digitW=11;
-                int x=startX;
-                for (int i=0;i<5;i++) {
-                    bool inv = highlight && (i+startDigit)==menu.getEditDigitIndex();
-                    if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x,y,digitW,16,SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.fillRect(x,y,digitW,16,SSD1306_BLACK);} display.setCursor(x,y); display.print(buf[i]); if (i==3) { display.print('.'); x+=digitW;} x+=digitW;
-                }
-                int labelX = startX + digitW*(5+1) + 10;
-                display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
-            };
-            // First row: TOFF (digits 0..4)
-            drawTimerRowEdit(menu.getEditToffTenths(), 0, "Toff", 0, true);
-            // Second row: TON (digits 5..9)
-            drawTimerRowEdit(menu.getEditTonTenths(), 24, "Ton", 5, true);
-            display.setTextSize(1); display.setCursor(0,54); display.print("#=Next *=Cancel");
-        }
-        // Show progress bar for long-press only after a grace period
-    unsigned long holdMs = buttons.hashHoldDuration();
-        unsigned long pressStart = buttons.hashPressStartTime();
-    unsigned long exitTime = menu.getMenuExitTime();
-    bool neverExited = (exitTime == 0);
-    // Require a post-exit release only if we've actually exited the menu before
-    bool releasedAfterExit = neverExited ? true : (buttons.hashLastReleaseTime() > exitTime);
-    // Hold must have started after exit (or simply started if never exited)
-    bool holdStartedAfterExit = (pressStart != 0) && (neverExited || (pressStart >= exitTime));
-    bool allowBar = releasedAfterExit && holdStartedAfterExit;
-    // Suppress for a grace period after exiting the menu to avoid visual blips
-    bool recentlyExitedMenu = (!neverExited) && ((millis() - exitTime) < Defaults::MENU_HOLD_GRACE_MS);
-        if (allowBar && !recentlyExitedMenu && holdMs >= Defaults::MENU_HOLD_GRACE_MS && holdMs < ButtonInput::LONG_PRESS_MS) {
-            // Reset progress origin to 0 at grace, so bar starts empty at that moment
-            unsigned long adjHold = holdMs - Defaults::MENU_HOLD_GRACE_MS;
-            unsigned long adjLong = ButtonInput::LONG_PRESS_MS - Defaults::MENU_HOLD_GRACE_MS;
-            drawProgressBar(adjHold, adjLong);
-            float pct = (float)adjHold / (float)adjLong;
-            DebugMetrics::instance().recordProgress(pct);
-        }
-    }
-
-    unsigned long tPre = millis();
-    display.display();
-    unsigned long tEnd = millis();
-    unsigned long flush = tEnd - tPre;
-    // Aggregate metrics instead of per-frame spam
-    DebugMetrics::instance().recordDisplayFrame((uint32_t)(tPre - tStart), (uint32_t)flush, (uint32_t)(tEnd - tStart));
-    if (flush > 50) { // unexpected large delay, attempt soft recovery (silent apart from metric)
-        DebugMetrics::instance().recordSlowFlush();
-        static unsigned long lastReinit = 0;
-        if (millis() - lastReinit > 1000) {
-            lastReinit = millis();
-            Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-            Wire.setClock(400000);
-            display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-        }
-    }
+	// Route to menu or main
+	if (menu.isInMenu() || menu.getMode() != MenuSystem::Mode::ROOT) {
+		drawMenu(menu, deviceMgr);
+	} else {
+		drawMainScreen(deviceMgr, battery);
+		// Show hold progress bar for '#' (menu entry visual)
+		unsigned long hold = buttons.hashHoldDuration();
+		if (hold >= Defaults::MENU_PROGRESS_START_MS) {
+			unsigned long prog = hold - Defaults::MENU_PROGRESS_START_MS;
+			unsigned long full = (Defaults::BUTTON_LONG_PRESS_MS > Defaults::MENU_PROGRESS_START_MS)
+								? (Defaults::BUTTON_LONG_PRESS_MS - Defaults::MENU_PROGRESS_START_MS)
+								: Defaults::BUTTON_LONG_PRESS_MS;
+			drawProgressBar(prog, full ? full : Defaults::BUTTON_LONG_PRESS_MS);
+		}
+	}
+	// Flush to OLED
+	unsigned long tFlushStartUs = micros();
+	display.display();
+	unsigned long flushMs = (micros() - tFlushStartUs) / 1000UL;
+	unsigned long prepMs = (millis() - tStart);
+	unsigned long totalMs = prepMs + flushMs;
+	DebugMetrics::instance().recordDisplayFrame((uint32_t)prepMs, (uint32_t)flushMs, (uint32_t)totalMs);
 }
 
-void DisplayManager::drawErrorScreen() const {
-    // Re-draw minimal error panel periodically in case previous content was overwritten
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0); display.println("OLED/I2C not found");
-    display.setCursor(0, 12); display.println("Check wiring:");
-    display.setCursor(0, 22); display.println("SDA=D4 (GPIO6)");
-    display.setCursor(0, 32); display.println("SCL=D5 (GPIO7)");
-    display.setCursor(0, 44); display.println("Addr 0x3C");
-    display.display();
-}
 
-void DisplayManager::drawUpdateCountdown(uint8_t secondsRemaining) const {
-    if (!inited) return;
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-    // Header
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println("Firmware Update Mode");
-    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-    // Short instruction without any hold/release hints
-    display.setCursor(0, 16);
-    display.println("Connect USB and flash");
-    // Big centered countdown in seconds
-    {
-        char buf[8]; snprintf(buf, sizeof(buf), "%us", (unsigned)secondsRemaining);
-        // Choose size based on digits to keep centered
-        int len = strlen(buf);
-        int size = 3; // big but fits alongside header
-        display.setTextSize(size);
-        int charW = 6 * size; int charH = 8 * size;
-        int textW = len * charW;
-        int x = (128 - textW) / 2; if (x < 0) x = 0;
-        // Draw near the bottom: one line above the very bottom in this font size
-        int y = 64 - charH - 2; if (y < 10) y = 10; // keep above header if very large
-        // Clear countdown area before drawing to avoid ghosting
-        display.fillRect(0, y-2, 128, charH+4, SSD1306_BLACK);
-        display.setCursor(x, y);
-        display.print(buf);
-    }
-    display.display();
-}
-
-void DisplayManager::drawBootStatus(const char* msg) const {
-    if (!inited) return;
-    // Clear bottom line area and print a single status line
-    const int y = 54;
-    display.fillRect(0, y-1, 128, 11, SSD1306_BLACK);
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-    // Clip message to available width
-    int maxChars = 21; // ~21*6=126px
-    char buf[32];
-    if (!msg) msg = "";
-    strncpy(buf, msg, sizeof(buf)-1);
-    buf[sizeof(buf)-1] = 0;
-    if ((int)strlen(buf) > maxChars) buf[maxChars] = 0;
-    display.setCursor(0, y);
-    display.print(buf);
-    display.display();
-}
-
-void DisplayManager::drawBatteryIndicator(uint8_t percent) const {
-    int x = Defaults::UI_BATT_X;
-    int y = Defaults::UI_BATT_Y;
-    int w = Defaults::UI_BATT_W;
-    int h = Defaults::UI_BATT_H;
-    int termW = Defaults::UI_BATT_TERM_W;
-    int termH = Defaults::UI_BATT_TERM_H;
-    // Clear area
-    display.fillRect(x, y, w + termW + 1, h, SSD1306_BLACK);
-    // Body
-    display.drawRect(x, y, w, h, SSD1306_WHITE);
-    // Terminal (to the right, vertically centered)
-    display.fillRect(x + w, y + (h - termH)/2, termW, termH, SSD1306_WHITE);
-    // Fill level (1px inset)
-    int innerW = w - 2;
-    int innerH = h - 2;
-    if (percent > 100) percent = 100;
-    int fillW = (innerW * percent) / 100;
-    if (fillW < 0) fillW = 0; if (fillW > innerW) fillW = innerW;
-    if (fillW > 0) display.fillRect(x + 1, y + 1, fillW, innerH, SSD1306_WHITE);
-    // Charging/Power icons
-    // D6 (GPIO21) = CHG (HIGH when charging), D7 (GPIO7) = PWR (HIGH when plugged). Charging takes precedence.
-    bool charging=false, plugged=false;
-    if (CHARGER_CHG_PIN >= 0) charging = (digitalRead(CHARGER_CHG_PIN) == HIGH);
-    if (CHARGER_PWR_PIN >= 0) plugged  = (digitalRead(CHARGER_PWR_PIN) == HIGH);
-    if (charging) {
-        // Lightning bolt (invert inside the battery body)
-        int bx = x + w/2 - 2;
-        int by = y + 1;
-        display.drawLine(bx+1, by+0, bx+3, by+3, SSD1306_BLACK);
-        display.drawLine(bx+3, by+3, bx+2, by+3, SSD1306_BLACK);
-        display.drawLine(bx+2, by+3, bx+4, by+6, SSD1306_BLACK);
-        display.drawLine(bx+0, by+3, bx+2, by+3, SSD1306_BLACK);
-        display.drawLine(bx+2, by+3, bx+0, by+6, SSD1306_BLACK);
-    } else if (plugged) {
-        // Small plug glyph: two prongs and cord stub
-        int px = x + w/2 - 3;
-        int py = y + 2;
-        // Plug body
-        display.fillRect(px, py, 5, 3, SSD1306_BLACK);
-        // Prongs
-        display.drawPixel(px+1, py-1, SSD1306_BLACK);
-        display.drawPixel(px+3, py-1, SSD1306_BLACK);
-        // Cord
-        display.drawLine(px+4, py+1, px+6, py+1, SSD1306_BLACK);
-    }
-}
-
-void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const {
-    display.setTextSize(1);
-    if (menu.isEditingBlanking()) {
-        // Editing UI for Display Blanking
-        display.setCursor(0, 0);
-        display.setTextColor(SSD1306_WHITE);
-        display.println("Display Blanking");
-        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-        int val = menu.getEditingBlankingSeconds();
-        display.setCursor(0, 16);
-        if (val == 0) display.println("Current: OFF");
-        else { display.print("Current: "); display.print(val); display.println("s"); }
-        display.setCursor(0, 28);
-        display.println("Up/Down change");
-        display.setCursor(0, 40);
-        display.println("#=Save  *=Back");
-        // Show applied (active) for context
-        display.setCursor(0, 54);
-        int applied = menu.getAppliedBlankingSeconds();
-        display.print("Active: "); if (applied==0) display.print("OFF"); else { display.print(applied); display.print("s"); }
-        return;
-    } else if (menu.isEditingTxPower()) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("WiFi TX Power"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,16); display.print("Level: "); display.print((int)menu.getEditingTxPowerQdbm()); display.println(" qdBm");
-        display.setCursor(0,28); display.println("Up/Down change");
-        display.setCursor(0,40); display.println("#=Save  *=Back");
-        return;
-    } else if (menu.isEditingBrightness()) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("OLED Brightness"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        // Apply brightness preview while editing
-        uint8_t lvl = menu.getEditingOledBrightness();
-        display.ssd1306_command(SSD1306_SETCONTRAST);
-        display.ssd1306_command(lvl);
-        display.setCursor(0,16); display.print("Level: "); display.print((int)lvl);
-        display.setCursor(0,28); display.println("Up/Down change");
-        display.setCursor(0,40); display.println("#=Save  *=Back");
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::EDIT_TIMERS) {
-        // Edit Timers modal: draw same style as main overlay but inside menu path
-        auto drawTimerRowEdit = [&](int tenths, int y, const char* label, int startDigit){
-            char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
-            display.setTextSize(2);
-            int startX = Defaults::UI_TIMER_START_X; int digitW = Defaults::UI_DIGIT_WIDTH; int x=startX;
-            for (int i=0;i<5;i++) {
-                bool inv = ((i+startDigit)==menu.getEditDigitIndex());
-                if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x,y,digitW,16,SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.fillRect(x,y,digitW,16,SSD1306_BLACK);} display.setCursor(x,y); display.print(buf[i]); if (i==3) { display.print('.'); x+=digitW;} x+=digitW;
-            }
-            int labelX = startX + digitW*(5+1) + Defaults::UI_LABEL_GAP_X;
-            display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
-        };
-        drawTimerRowEdit(menu.getEditToffTenths(), Defaults::UI_TIMER_ROW_Y_OFF, "Toff", 0);
-        drawTimerRowEdit(menu.getEditTonTenths(),  Defaults::UI_TIMER_ROW_Y_ON,  "Ton",  5);
-        display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(0,54); display.print("#=Next *=Cancel");
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::PAIRING) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Pair Timer"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        auto *comm = CommManager::get();
-        int count = (comm? comm->getDiscoveredCount():0);
-        int sel = menu.getPairingSelection(); if (sel >= count) sel = count>0?count-1:0;
-        int first = 0; if (sel >= 4) first = sel-3;
-        for (int i=0;i<4 && first+i<count;i++) {
-            const auto &d = comm->getDiscovered(first+i);
-            bool highlight = (first+i)==sel;
-            int y = 12 + i*12;
-            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);}                
-            display.setCursor(2,y);
-            char macBuf[18]; snprintf(macBuf,sizeof(macBuf),"%02X%02X%02X", d.mac[3],d.mac[4],d.mac[5]);
-            // Mark if already paired
-            bool already=false; for(int p=0;p<deviceMgr.getDeviceCount();++p){ if (memcmp(deviceMgr.getDevice(p).mac,d.mac,6)==0){already=true;break;} }
-            char line[32]; snprintf(line,sizeof(line),"%c%s %s",already?'*':' ', macBuf, d.name[0]?d.name:"(noname)");
-            display.print(line);
-        }
-        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-        if (count>0) {
-            // Footer reflects pair/unpair for selected
-            const auto &d = comm->getDiscovered(sel);
-            bool already=false; for(int p=0;p<deviceMgr.getDeviceCount();++p){ if (memcmp(deviceMgr.getDevice(p).mac,d.mac,6)==0){already=true;break;} }
-            display.setCursor(0,54); display.print("#="); display.print(already?"Unpair":"Pair"); display.print(" *=Back");
-        } else {
-            display.setCursor(0,14); display.println("Scanning...");
-            display.setCursor(0,26); display.println("*=Back");
-        }
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::MANAGE_DEVICES) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Manage Devices"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        int count = deviceMgr.getDeviceCount();
-        if (count == 0) { display.setCursor(0,14); display.println("None"); display.setCursor(0,26); display.println("*=Back"); return; }
-        int sel = menu.getManageSelection(); if (sel >= count) sel = count-1;
-        int activeIdx = deviceMgr.getActiveIndex();
-        int first=0; if (sel>=4) first=sel-3;
-        for (int i=0;i<4 && first+i<count;i++) {
-            int idx=first+i; const auto &d = deviceMgr.getDevice(idx);
-            bool highlight = (idx==sel);
-            int y=12 + i*12;
-            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-            display.setCursor(2,y);
-            char line[32]; snprintf(line,sizeof(line),"%c %s", idx==activeIdx?'*':' ', d.name[0]?d.name:"(noname)");
-            display.print(line);
-        }
-        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-        display.setCursor(0,54); display.println("#=Activate  #L=Del *=Back"); return;
-    } else if (menu.getMode() == MenuSystem::Mode::RENAME_DEVICE) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Rename Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        if (!menu.renameEditing()) {
-            display.setCursor(0,14); display.println("Press # to edit");
-            display.setCursor(0,26); display.println("*=Back");
-            return;
-        } else {
-            // Show buffer with inverted highlight box on current position (no underscores)
-            display.setTextSize(2);
-            const char* buf = menu.getRenameBuffer();
-            int pos = menu.getRenamePos();
-            const int charW = 12; const int charH = 16; const int y = 14;
-            // Clear the row area to avoid artifacts on shorter names
-            display.fillRect(0, y, 128, charH, SSD1306_BLACK);
-            for (int i = 0; buf[i] != '\0'; ++i) {
-                int x = i * charW;
-                bool inv = (i == pos);
-                if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x, y, charW, charH, SSD1306_WHITE); }
-                else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); /* keep background black for non-selected */ }
-                display.setCursor(x, y);
-                // Print character as-is (space remains space); selected space remains visible due to inversion
-                display.print(buf[i]);
-            }
-            display.setTextSize(1);
-            display.setCursor(0,48); display.setTextColor(SSD1306_WHITE); display.print("Up/Down change  #=Next  *=Back");
-            return;
-        }
-    } else if (menu.getMode() == MenuSystem::Mode::EDIT_NAME) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Edit Name"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        // Render name with inverted highlight on current character (matches timer editor style)
-        display.setTextSize(2);
-        {
-            const char* buf = menu.getRenameBuffer();
-            int pos = menu.getRenamePos();
-            const int charW = 12; const int charH = 16; const int y = 14;
-            display.fillRect(0, y, 128, charH, SSD1306_BLACK);
-            for (int i = 0; buf[i] != '\0'; ++i) {
-                int x = i * charW;
-                bool inv = (i == pos);
-                if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x, y, charW, charH, SSD1306_WHITE); }
-                else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); }
-                display.setCursor(x, y);
-                display.print(buf[i]);
-            }
-        }
-        display.setTextSize(1);
-        display.setCursor(0,48); display.setTextColor(SSD1306_WHITE); display.print("Up/Down change  #=Next  *=Back");
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::SELECT_ACTIVE) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Active Timer"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        int count = deviceMgr.getDeviceCount();
-        if (count == 0) { display.setCursor(0,14); display.println("No devices"); display.setCursor(0,26); display.println("*=Back"); return; }
-        int sel = menu.getActiveSelectIndex();
-        if (sel >= count) sel = count-1; if (sel < 0) sel = 0; // clamp
-        int activeIdx = deviceMgr.getActiveIndex();
-        // show up to 4
-        int first = 0; if (sel >= 4) first = sel-3;
-        for (int i=0;i<4 && first+i<count;i++) {
-            int idx = first + i;
-            const auto &d = deviceMgr.getDevice(idx);
-            bool highlight = (idx==sel);
-            int y = 12 + i*12;
-            if (highlight) { display.fillRect(0,y,128,10,SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);}                
-            display.setCursor(2,y);
-            char line[32];
-            // Prefix '*' for currently active device (even if not selection highlight)
-            snprintf(line,sizeof(line),"%c %s", (idx==activeIdx?'*':' '), d.name[0]?d.name:"(noname)");
-            display.print(line);
-        }
-        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-        display.setCursor(0,54); display.println("#=Set *=Back"); return;
-    } else if (menu.getMode() == MenuSystem::Mode::CONFIRM) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Confirm"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        const char* what = "";
-        auto act = menu.getConfirmAction();
-    if (act == MenuSystem::ConfirmAction::RESET_SLAVE) what = "Reset Timer?";
-        else if (act == MenuSystem::ConfirmAction::RESET_REMOTE) what = "Reset Remote?";
-        display.setCursor(0,24); display.println(what);
-        display.setCursor(0,54); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.println("#=Yes *=No");
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::SHOW_RSSI) {
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0,0); display.print("RSSI");
-        // Right-align units "dBm" at the top-right
-        const char* units = "dBm"; int unitsW = 3*6; int unitsX = 127 - unitsW + 1; if (unitsX < 0) unitsX = 0;
-        display.setCursor(unitsX, 0); display.print(units);
-        display.drawLine(0,9,127,9,SSD1306_WHITE);
-        // Header row aligned with data columns: Name, R (Remote), T (Timer)
-        display.setTextSize(1);
-        const int colNameX = 2;
-        const int colRRightX = 96;   // right edge for R column
-        const int colTRightX = 126;  // right edge for T column
-        display.setCursor(colNameX, 10); display.print("Name");
-        // Place single-letter headers above right-aligned numeric columns
-        display.setCursor(colRRightX - 6, 10); display.print('R');
-        display.setCursor(colTRightX - 6, 10); display.print('T');
-        int count = 0; int activeIdx = -1; if (auto *cm=CommManager::get()) { count = cm->getPairedCount(); if (cm->getActiveDevice()) activeIdx = cm->getActiveDevice() - &cm->getPaired(0); }
-        int first = menu.getRssiFirst(); if (first < 0) first = 0; if (first > count-1) first = count>0?count-1:0;
-        int maxRows = 4; // rows under header
-        for (int i=0;i<maxRows;i++) {
-            int idx = first + i; if (idx >= count) break;
-            const auto &d = CommManager::get()->getPaired(idx);
-            int y = 20 + i*11;
-            // Left: active marker and name (clipped length to keep columns clear)
-            char name[10]; strncpy(name, d.name[0]?d.name:"(noname)", sizeof(name)-1); name[sizeof(name)-1]=0;
-            display.setCursor(colNameX, y);
-            display.print((idx==activeIdx)?'*':' ');
-            display.print(name);
-            // Right: Remote (R) and Timer (T) RSSI values, right-aligned under headers
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%d", (int)d.rssiRemote);
-            int w = (int)strlen(buf) * 6; display.setCursor(colRRightX - w, y); display.print(buf);
-            // Timer RSSI with stale guard
-            bool stale = (millis() - d.lastStatusMs) > Defaults::RSSI_STALE_MS;
-            if (d.rssiSlave <= -120 || stale) { strcpy(buf, "N/A"); }
-            else { snprintf(buf, sizeof(buf), "%d", (int)d.rssiSlave); }
-            w = (int)strlen(buf) * 6; display.setCursor(colTRightX - w, y); display.print(buf);
-        }
-        display.setCursor(0,57); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.print("Up/Down scroll  *=Back  #=Refresh");
-        return;
-    } else if (menu.getMode() == MenuSystem::Mode::BATTERY_CALIB) {
-        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Battery Cal"); display.drawLine(0,9,127,9,SSD1306_WHITE);
-        display.setCursor(0,14);
-        if (!menu.batteryCalActive()) { display.println("Press # to start"); display.setCursor(0,26); display.println("*=Back"); }
-        else {
-            // Simple three-point editor: A0 (0%), A50 (50%), A100 (100%)
-            int idx = menu.getEditCalibIndex();
-            display.print("A0:"); display.print(menu.getEditCalib(0)); display.print("  ");
-            display.print("A50:"); display.print(menu.getEditCalib(1)); display.print("  ");
-            display.print("A100:"); display.println(menu.getEditCalib(2));
-            // underline current
-            int underlineY = 22; int startX = idx==0?0:(idx==1?36:80); int endX = startX + 28;
-            display.drawLine(startX, underlineY, endX, underlineY, SSD1306_WHITE);
-            display.setCursor(0,32);
-            display.println("Up/Down chg  *=Next  #=Save");
-        }
-        return;
-    } else {
-        int start = menu.getVisibleStart();
-        int lines = menu.getVisibleCount(5);
-        const int rowH = 10;
-        int yBase = 10;
-        bool scrollAnim = menu.isScrollAnimating();
-        bool selAnim = menu.isSelectionAnimating() && !scrollAnim; // suppress selection anim during scroll anim
-        float scrollProgress = 1.0f;
-        int prevScroll = menu.getPrevScrollOffset();
-        int dir = menu.getScrollAnimDir();
-        if (scrollAnim) {
-            unsigned long dt = millis() - menu.getScrollAnimStart();
-            if (dt > MenuSystem::SCROLL_ANIM_MS) dt = MenuSystem::SCROLL_ANIM_MS;
-            scrollProgress = (float)dt / (float)MenuSystem::SCROLL_ANIM_MS;
-        }
-        auto drawList = [&](int baseOffset, int yShift){
-            for (int i=0;i<lines;++i) {
-                int idx = baseOffset + i;
-                if (idx >= menu.getItemCount()) break;
-                const MenuItem& it = menu.getItem(idx);
-                int y = yBase + i*rowH + yShift;
-                display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-                display.setCursor(2,y);
-                display.print(it.label);
-            }
-        };
-        if (scrollAnim) {
-            int prevShift = (int)(-dir * rowH * scrollProgress + 0.5f);
-            int newShift = (int)(dir * rowH * (1.0f - scrollProgress) + 0.5f);
-            drawList(prevScroll, prevShift);
-            drawList(start, newShift);
-        } else {
-            drawList(start, 0);
-        }
-        // Highlight selected row (new list coords)
-        int selIdx = menu.getSelectedIndex();
-        int rel = selIdx - start;
-        if (rel >=0 && rel < lines) {
-            int yTarget = yBase + rel*rowH;
-            if (selAnim) {
-                unsigned long dt = millis() - menu.getLastSelectionChangeTime();
-                if (dt > MenuSystem::SELECTION_ANIM_MS) dt = MenuSystem::SELECTION_ANIM_MS;
-                float p = (float)dt / (float)MenuSystem::SELECTION_ANIM_MS;
-                int prevSel = menu.getPrevSelectedIndex();
-                int prevRel = prevSel - start;
-                if (prevRel>=0 && prevRel<lines) {
-                    int yPrev = yBase + prevRel*rowH;
-                    int yAnim = (int)( (float)yPrev + (float)(yTarget - yPrev)*p + 0.5f );
-                    display.fillRect(0, yAnim-1, 128, rowH, SSD1306_WHITE);
-                    display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-                    display.setCursor(2,yAnim);
-                    display.print(menu.getItem(selIdx).label);
-                } else {
-                    display.fillRect(0, yTarget-1, 128, rowH, SSD1306_WHITE);
-                    display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-                    display.setCursor(2,yTarget);
-                    display.print(menu.getItem(selIdx).label);
-                }
-            } else {
-                display.fillRect(0, yTarget-1, 128, rowH, SSD1306_WHITE);
-                display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-                display.setCursor(2,yTarget);
-                display.print(menu.getItem(selIdx).label);
-            }
-        }
-        // Scroll indicators (up & down carets)
-        if (start > 0) display.drawTriangle(120, 8, 125, 8, 122, 3, SSD1306_WHITE); // up caret (apex up)
-        if (start + lines < menu.getItemCount()) display.drawTriangle(120, 57, 125, 57, 122, 62, SSD1306_WHITE); // down caret (apex down)
-    }
-}
-
-void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const {
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-    // Do not place text at y=0 to avoid overlapping the battery icon
-    if (deviceMgr.getDeviceCount() == 0) {
-        display.setCursor(0, 12);
-        display.print("No paired");
-        display.setCursor(0, 24);
-        display.print("timers.");
-        return;
-    }
-    const SlaveDevice* act = deviceMgr.getActive();
-    if (!act) {
-        display.setCursor(0, 12);
-        display.print("No active");
-        return;
-    }
-    // Draw a small RSSI icon for the active timer below the battery icon
-    {
-        auto drawRssiBars = [&](int8_t rssi, int x, int y){
-            // Map dBm to 0..6 bars (cellular-like)
-            int level = 0;
-            if      (rssi > -45) level = 6;
-            else if (rssi > -55) level = 5;
-            else if (rssi > -65) level = 4;
-            else if (rssi > -75) level = 3;
-            else if (rssi > -85) level = 2;
-            else if (rssi > -95) level = 1;
-            else level = 0;
-            const int bars = 6;
-            const int barW = 2; const int gap = 1; const int areaH = 12; // total drawing height
-            // Heights increase per column (2,4,6,8,10,12)
-            for (int i=0;i<bars;i++) {
-                int h = 2 + i*2;
-                int bx = x + i*(barW+gap);
-                int baseY = y + (areaH - 1); // bottom scanline
-                int by = baseY - (h - 1);
-                // Clear column area first
-                display.fillRect(bx, y, barW, areaH, SSD1306_BLACK);
-                // Always draw a 1px baseline so user sees column bottoms
-                display.fillRect(bx, baseY, barW, 1, SSD1306_WHITE);
-                // Fill bar if enabled by level
-                if (i < level) {
-                    // Keep baseline as 1px; fill above it up to h
-                    if (h > 1) display.fillRect(bx, by, barW, h-1, SSD1306_WHITE);
-                } else {
-                    // Outline the potential bar height for context
-                    display.drawRect(bx, by, barW, h-1, SSD1306_WHITE);
-                }
-            }
-        };
-        int rssiY = Defaults::UI_BATT_Y + Defaults::UI_BATT_H + 4; // a couple pixels lower than before
-        drawRssiBars(act->rssiSlave, 0, rssiY);
-    }
-    unsigned long now = millis();
-    bool fresh = (act->lastStatusMs != 0) && (now - act->lastStatusMs < 5000UL);
-    if (!fresh) {
-        display.setTextSize(1);
-        // Move message two lines further down and update wording per request
-        display.setCursor(0, 36);
-        display.print("Timer disconnected...");
-        return;
-    }
-    // Timers positioned like original using Defaults
-    drawTimerRow((int)(act->toff*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_OFF, "OFF", Defaults::UI_TIMER_START_X);
-    drawTimerRow((int)(act->ton*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_ON,  "ON",  Defaults::UI_TIMER_START_X);
-    // Third line: elapsed time in current state (TIME), smoothed locally until next STATUS
-    {
-        unsigned long nowMs = millis();
-        float since = (act->lastStatusMs > 0) ? ((nowMs - act->lastStatusMs) / 1000.0f) : 0.0f;
-        float e = act->elapsed + since;
-        float cap = act->outputState ? act->ton : act->toff;
-        if (e > cap) e = cap;
-        drawTimerRow((int)(e*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_TIME,  "TIME",  Defaults::UI_TIMER_START_X);
-    }
-    // State indicator: show '*' at bottom-left when ON (matches original feel)
-    display.setTextSize(2); if (act->outputState) { display.setCursor(0, Defaults::UI_STATE_CHAR_Y); display.print('*'); }
-}
-
-void DisplayManager::drawTimerRow(int tenths, int y, const char* label, int startX) const {
-    char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
-    display.setTextSize(2);
-    int x = startX; int digitW = Defaults::UI_DIGIT_WIDTH;
-    for (int i=0;i<5;i++) {
-        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
-        display.fillRect(x,y,digitW,16,SSD1306_BLACK);
-        display.setCursor(x,y);
-        display.print(buf[i]);
-        if (i==3) { display.print('.'); x+=digitW; }
-        x += digitW;
-    }
-    int labelX = startX + digitW*(5+1) + Defaults::UI_LABEL_GAP_X;
-    display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
-}
-
-void DisplayManager::drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const {
-    const int barX = Defaults::UI_PBAR_X, barY = Defaults::UI_PBAR_Y, barW = Defaults::UI_PBAR_W, barH = Defaults::UI_PBAR_H;
-    float percent = (float)holdMs / (float)longPressMs;
-    if (percent < 0.f) percent = 0.f; if (percent > 1.f) percent = 1.f;
-    display.fillRect(barX, barY, barW, barH, SSD1306_BLACK);
-    display.drawRect(barX, barY, barW, barH, SSD1306_WHITE);
-    int fillW = (int)((barW-2) * percent + 0.5f);
-    if (fillW > 0) display.fillRect(barX+1, barY+1, fillW, barH-2, SSD1306_WHITE);
-    display.setTextSize(1);
-    if (percent >= 0.99f) {
-        static bool blink=false; static unsigned long lastBlink=0; unsigned long now=millis();
-        if (now - lastBlink > 350) { blink = !blink; lastBlink = now; }
-        if (blink) {
-            const char* txt="MENU"; int txtW=4*6; int tx=barX+(barW-txtW)/2; int ty=barY+4;
-            display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-            display.setCursor(tx,ty); display.print(txt);
-        }
-    } else {
-        int pctInt = (int)(percent * 100.0f + 0.5f); char buf[8]; snprintf(buf,sizeof(buf),"%3d%%", pctInt);
-        int txtW=5*6; int tx=barX+(barW-txtW)/2; int ty=barY+4;
-        display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-        display.setCursor(tx,ty); display.print(buf);
-    }
-}

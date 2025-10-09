@@ -319,16 +319,8 @@ void loop() {
 // all buttons in the mask to wake on any button.
 static void maybeEnterDeepSleep(const DisplayManager& disp) {
   if (!disp.isBlank()) return;
-  // Reliable wake on ESP32-C3: use EXT1 wake on a single RTC-capable active-low button.
-  // Use UP (GPIO3) so pressing it wakes the device.
-  const uint64_t wake_mask = (1ULL << BUTTON_UP_GPIO);
-  // For active-low buttons, use ALL_LOW (pin goes low when pressed)
-  // Ensure RTC pull-up is enabled so the line stays HIGH during deep sleep
-  rtc_gpio_init((gpio_num_t)BUTTON_UP_GPIO);
-  rtc_gpio_set_direction((gpio_num_t)BUTTON_UP_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en((gpio_num_t)BUTTON_UP_GPIO);
-  rtc_gpio_pulldown_dis((gpio_num_t)BUTTON_UP_GPIO);
-  esp_deep_sleep_enable_ext1_wakeup(wake_mask, ESP_EXT1_WAKEUP_ALL_LOW);
-  delay(5);
+  // Wake on any button press (active-low buttons): UP, DOWN, #, *
+  const uint64_t wake_mask = (1ULL<<BUTTON_UP_GPIO) | (1ULL<<BUTTON_DOWN_GPIO) | (1ULL<<BUTTON_HASH_GPIO) | (1ULL<<BUTTON_STAR_GPIO);
+  esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 }

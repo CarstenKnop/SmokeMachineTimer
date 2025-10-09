@@ -8,6 +8,9 @@
 // replicate it here (or refactor later to a shared include path).
 // ---------------------------------------------------------------------------
 #pragma once
+// Ensure Arduino fixed-width types (uint8_t, etc.) are available
+#include <Arduino.h>
+#include <stdint.h>
 
 namespace Defaults {
   // Display rotation: 0,1,2,3 => 0/90/180/270 degrees

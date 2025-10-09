@@ -17,7 +17,7 @@ public:
     float getToff() const;
     const char* getName() const;
     float ton, toff;
-    char name[16];
+    char name[10]; // 9 + NUL
          static constexpr uint8_t EEPROM_MAGIC = 0x42;
          static constexpr int EEPROM_MAGIC_ADDR = 100;
 };

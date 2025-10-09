@@ -22,6 +22,9 @@ public:
     bool starHeld() const { return states[3]; }
     unsigned long hashHoldDuration() const { return states[2] ? (millis() - hashPressStart) : 0; }
     unsigned long hashPressStartTime() const { return states[2] ? hashPressStart : 0; }
+    // STAR helpers (symmetry with HASH)
+    unsigned long starHoldDuration() const { return states[3] ? (millis() - starPressStart) : 0; }
+    unsigned long starPressStartTime() const { return states[3] ? starPressStart : 0; }
     // Legacy right* methods retained but mapped to star for now (not used for menu)
     bool rightLongPressed() const { return false; }
     unsigned long rightHoldDuration() const { return 0; }
@@ -43,6 +46,9 @@ private:
     unsigned long hashPressStart = 0;
     unsigned long hashReleaseTime = 0;
     bool hashLongPressActive = false;
+    unsigned long starPressStart = 0;
+    unsigned long starReleaseTime = 0;
 public:
     unsigned long hashLastReleaseTime() const { return hashReleaseTime; }
+    unsigned long starLastReleaseTime() const { return starReleaseTime; }
 };

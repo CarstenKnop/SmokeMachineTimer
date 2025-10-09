@@ -21,8 +21,9 @@ struct __attribute__((packed)) ProtocolMsg {
     float ton;
     float toff;
     float elapsed;        // seconds elapsed in current state (for TIME row)
-    char name[16];
+        char name[10];        // 9 chars + NUL
     bool outputOverride;
     bool resetState;
+    int8_t rssiAtTimer;   // RSSI measured at timer for last packet from remote
     uint16_t calibAdc[3]; // For battery calibration
 };

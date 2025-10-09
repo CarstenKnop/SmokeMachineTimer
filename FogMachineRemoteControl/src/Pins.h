@@ -25,6 +25,11 @@ static constexpr int BUTTON_DOWN_GPIO  = 4;   // D2 silk (also alt SDA if reused
 static constexpr int BUTTON_HASH_GPIO  = 9;   // '#' button (was LEFT)
 static constexpr int BUTTON_STAR_GPIO  = 10;  // '*' button (was RIGHT)
 
+// Optional charger status inputs. Use internal pull-downs.
+// PWR sense on GPIO21 (HIGH when USB/external power present), CHG sense on GPIO20 (HIGH when charging)
+static constexpr int CHARGER_PWR_GPIO  = 21;  // raw GPIO21
+static constexpr int CHARGER_CHG_GPIO  = 20;  // raw GPIO20
+
 // Provide legacy macro-style names used elsewhere if any
 #define COMM_OUT_PIN    COMM_OUT_GPIO
 #define BAT_ADC_PIN     BAT_ADC_GPIO
@@ -38,6 +43,9 @@ static constexpr int BUTTON_STAR_GPIO  = 10;  // '*' button (was RIGHT)
 #define BUTTON_RIGHT_PIN BUTTON_STAR_GPIO   // legacy alias
 #define BUTTON_HASH_PIN  BUTTON_HASH_GPIO
 #define BUTTON_STAR_PIN  BUTTON_STAR_GPIO
+// Charger alias
+#define CHARGER_CHG_PIN  CHARGER_CHG_GPIO
+#define CHARGER_PWR_PIN  CHARGER_PWR_GPIO
 
 #define MENU_ENTER_BUTTON_PIN BUTTON_HASH_PIN  // Long-press '#' enters menu
 

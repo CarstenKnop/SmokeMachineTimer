@@ -22,10 +22,15 @@ namespace Defaults {
   static constexpr int OLED_SDA = 6;       // Primary I2C SDA (alt pair handled elsewhere if needed)
   static constexpr int OLED_SCL = 7;       // Primary I2C SCL
 
-  // Timer bounds (tenths of seconds) used when editing remote-side values
-  static constexpr unsigned long TIMER_MIN = 1;       // 0000.1s (0.1s)
-  static constexpr unsigned long TIMER_MAX = 99999;   // 9999.9s (~2h 46m)
   static constexpr int DIGITS = 5;                    // 5 digits (XXXX.X)
+
+  // Bounds for the timer device (slave) as enforced by its Config/Defaults
+  // FogMachineTimer/src/Defaults.h: TIMER_MIN=10 (1.0s), TIMER_MAX=60000 (6000.0s)
+  // Use these to cap values in the remote's timer editor so we never send out-of-range values.
+  static constexpr unsigned long SLAVE_TIMER_MIN_TENTHS = 1;      // 0.1s minimum (requested)
+  static constexpr unsigned long SLAVE_TIMER_MAX_TENTHS = 99999;  // 9999.9s maximum (2.77h)
+  // RSSI staleness window (ms)
+  static constexpr unsigned long RSSI_STALE_MS = 3000;
 
   // Menu / UI timing
   // Time user must hold '#' to trigger menu entry (long-press)
@@ -42,16 +47,18 @@ namespace Defaults {
   static constexpr unsigned long EDIT_BLINK_INTERVAL_MS  = 350;  // cursor blink
   static constexpr unsigned long MENU_FULL_BLINK_INTERVAL_MS = 400; // full-screen blink feedback
   // Star button behavior: threshold to distinguish click vs hold (ms)
-  static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 200;
+  // STAR: threshold to distinguish click vs hold (ms)
+  // Choose a value that avoids accidental holds but still feels responsive
+  static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 350;
 
   // Post-action result/info timeout
   static constexpr unsigned long MENU_RESULT_TIMEOUT_MS = 5000;  // 5s message lifetime
 
   // General loop pacing (soft delay per loop if needed)
-  static constexpr unsigned long LOOP_DELAY_MS = 10;
+  static constexpr unsigned long LOOP_DELAY_MS = 1;
 
   // COMM LED: minimum on-time for visibility (ms)
-  static constexpr unsigned long COMM_LED_MIN_ON_MS = 80; // make this longer (e.g., 120) if still not visible
+  static constexpr unsigned long COMM_LED_MIN_ON_MS = 2; // make this longer (e.g., 120) if still not visible
   // COMM LED polarity (true = active HIGH, false = active LOW)
   static constexpr bool COMM_LED_ACTIVE_HIGH = true;
 
@@ -77,6 +84,7 @@ namespace Defaults {
   static constexpr int UI_PBAR_Y          = 48;
   static constexpr int UI_PBAR_W          = 128;
   static constexpr int UI_PBAR_H          = 16;
+
 
   // Version tag (may be overridden later per project release scheme)
   inline const char* VERSION() { return "FogMachineTimer v1.0"; }

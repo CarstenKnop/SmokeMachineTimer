@@ -44,12 +44,17 @@ void ButtonInput::update() {
                     pressEdges[i]++;
                     if (i == 2) { // hash button start hold timer
                         hashPressStart = now;
+                    } else if (i == 3) { // star button start hold timer
+                        starPressStart = now;
                     }
                 } else {
                     if (i == 2) { // release resets long press state
                         hashPressStart = 0;
                         hashLongPressActive = false;
                         hashReleaseTime = now;
+                    } else if (i == 3) {
+                        starPressStart = 0;
+                        starReleaseTime = now;
                     }
                 }
             } else {

@@ -14,4 +14,7 @@ public:
 private:
     uint8_t pin;
     CalibrationManager& calibration;
+    // Oversampling count (simple average of multiple ADC reads)
+    static constexpr uint8_t OVERSAMPLE = 16;
+    uint16_t sampleAveraged() const;
 };

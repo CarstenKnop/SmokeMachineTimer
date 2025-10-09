@@ -6,7 +6,7 @@
 
 struct SlaveDevice {
     uint8_t mac[6];
-    char name[16];
+    char name[10]; // 9 + NUL
     int8_t rssiRemote = -127;   // RSSI measured at remote (placeholder)
     int8_t rssiSlave = -127;    // RSSI reported by slave (placeholder)
     float ton = 0.f;

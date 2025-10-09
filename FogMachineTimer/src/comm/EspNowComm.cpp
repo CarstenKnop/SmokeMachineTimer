@@ -7,6 +7,8 @@
 
 
 EspNowComm* EspNowComm::instance = nullptr;
+volatile int8_t EspNowComm::lastRxRssi = 0;
+uint8_t EspNowComm::lastSenderMac[6] = {0};
 
 
 EspNowComm::EspNowComm(TimerController& timerRef, DeviceConfig& configRef)
@@ -21,6 +23,9 @@ void EspNowComm::begin() {
         Serial.println("ESP-NOW init failed");
     }
     esp_now_register_recv_cb(EspNowComm::onDataRecv);
+    // Enable promiscuous mode to read RSSI of incoming frames
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_rx_cb(&EspNowComm::wifiSniffer);
 }
 
 void EspNowComm::loop() {
@@ -37,6 +42,8 @@ void EspNowComm::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     ProtocolMsg msg;
     memcpy(&msg, data, sizeof(msg));
     Serial.printf("[SLAVE] RX cmd=%u from %02X:%02X:%02X:%02X:%02X:%02X\n", (unsigned)msg.cmd, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+    // Track last sender MAC for associating RSSI from sniffer
+    memcpy(lastSenderMac, mac, 6);
         if (instance) instance->processCommand(msg, mac);
 }
 
@@ -49,12 +56,27 @@ void EspNowComm::sendStatus(const uint8_t* mac) {
     strncpy(reply.name, config.getName(), sizeof(reply.name)-1);
     reply.outputOverride = timer.isOutputOn();
     reply.resetState = false;
+    // Prefer captured RSSI from sniffer for the last sender if available
+    reply.rssiAtTimer = lastRxRssi ? lastRxRssi : getRssi();
     if (!esp_now_is_peer_exist(mac)) {
         esp_now_peer_info_t p = {}; memcpy(p.peer_addr, mac, 6); p.channel = 1; p.encrypt = false; esp_now_add_peer(&p);
         Serial.printf("[SLAVE] Added peer for status %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
     }
     esp_err_t r = esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
     Serial.printf("[SLAVE] Sent STATUS (%d)\n", (int)r);
+}
+
+// Static sniffer callback to capture RSSI
+void EspNowComm::wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA) return;
+    const wifi_promiscuous_pkt_t* pkt = (const wifi_promiscuous_pkt_t*)buf;
+    if (!pkt) return;
+    // Source MAC is at payload+10 for 802.11 header (addr2)
+    if (pkt->rx_ctrl.sig_len < 16) return;
+    const uint8_t* src = pkt->payload + 10;
+    if (memcmp(src, lastSenderMac, 6) == 0) {
+        lastRxRssi = pkt->rx_ctrl.rssi;
+    }
 }
 
 void EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
@@ -111,6 +133,7 @@ void EspNowComm::pushStatusIfStateChanged() {
         strncpy(reply.name, instance->config.getName(), sizeof(reply.name)-1);
         reply.outputOverride = instance->timer.isOutputOn();
         reply.resetState = false;
+        reply.rssiAtTimer = instance->getRssi();
         if (!esp_now_is_peer_exist(broadcast)) {
             esp_now_peer_info_t p = {}; memcpy(p.peer_addr, broadcast, 6); p.channel = 1; p.encrypt = false; esp_now_add_peer(&p);
         }

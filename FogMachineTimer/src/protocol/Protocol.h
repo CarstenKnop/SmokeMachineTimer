@@ -20,8 +20,9 @@ struct __attribute__((packed)) ProtocolMsg {
     float ton;            // seconds (ON duration)
     float toff;           // seconds (OFF duration)
     float elapsed;        // seconds elapsed in current state (for TIME row)
-    char name[16];
+    char name[10];      // 9 chars + NUL
     bool outputOverride;  // status: current output state / command: desired override
     bool resetState;      // request to reset internal timing cycle
+    int8_t rssiAtTimer;   // RSSI measured at timer for last packet from remote
     uint16_t calibAdc[3]; // battery calibration ADC points
 };

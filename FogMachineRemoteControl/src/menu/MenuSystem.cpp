@@ -12,14 +12,15 @@ static constexpr unsigned long NAV_REPEAT_INTERVAL_MS = 140; // subsequent repea
 
 MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), scrollOffset(0), lastNavTime(0), lastSelectTime(0) {
     items = {
-        {"Pair Device"},
-        {"Manage Devices"},
+        {"Pair Timer"},
         {"Rename Device"},
-        {"Select Active"},
+        {"Active Timer"},
         {"Edit Timers"},
+        {"WiFi TX Power"},
+        {"OLED Brightness"},
         {"Show RSSI"},
         {"Battery Calibration"},
-    {"Reset Timer"},
+        {"Reset Timer"},
         {"Reset Remote"},
         {"Display Blanking"}
     };
@@ -57,15 +58,13 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             const char* label = items[selectedIndex].label;
             if (strcmp(label, "Display Blanking") == 0) {
                 startBlankingEdit();
-            } else if (strcmp(label, "Pair Device") == 0) {
+            } else if (strcmp(label, "Pair Timer") == 0) {
                 enterPairing();
-            } else if (strcmp(label, "Manage Devices") == 0) {
-                enterManageDevices();
             } else if (strcmp(label, "Rename Device") == 0) {
                 const char* seed = "NAME"; if (auto *comm = CommManager::get()) { const SlaveDevice* act = comm->getActiveDevice(); if (act && act->name[0]) seed = act->name; }
                 enterEditName(seed);
-            } else if (strcmp(label, "Select Active") == 0) {
-                enterSelectActive();
+            } else if (strcmp(label, "Active Timer") == 0) {
+                enterSelectActive(false);
             } else if (strcmp(label, "Edit Timers") == 0) {
                 auto *comm = CommManager::get();
                 float ton=1.0f, toff=1.0f;
@@ -74,6 +73,10 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                     if (act) { ton = act->ton; toff = act->toff; }
                 }
                 enterEditTimers(ton, toff);
+            } else if (strcmp(label, "WiFi TX Power") == 0) {
+                enterTxPower();
+            } else if (strcmp(label, "OLED Brightness") == 0) {
+                enterBrightness();
             } else if (strcmp(label, "Show RSSI") == 0) {
                 enterShowRssi();
             } else if (strcmp(label, "Battery Calibration") == 0) {
@@ -106,36 +109,50 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             return;
         }
         // Long hash no-op while editing (selection done on short press)
+    } else if (mode == Mode::EDIT_TXPOWER) {
+        // Up/Down adjust in steps of 1 qdbm (0.25 dBm). Clamp 0..84.
+        if (upPressed)   { if (editTxPowerQdbm < 84) editTxPowerQdbm++; }
+        if (downPressed) { if (editTxPowerQdbm > 0)  editTxPowerQdbm--; }
+        if (starPressed) { // cancel -> revert to applied and back to root
+            editTxPowerQdbm = appliedTxPowerQdbm; mode = Mode::ROOT; return;
+        }
+        if (hashPressed) { // save
+            txSavePending = true; appliedTxPowerQdbm = editTxPowerQdbm; mode = Mode::ROOT; return;
+        }
+    } else if (mode == Mode::EDIT_BRIGHTNESS) {
+        // Up/Down adjust brightness (0..255)
+        if (upPressed)   { if (editOledBrightness < 255) editOledBrightness = (uint8_t)min<int>(255, editOledBrightness + 5); }
+        if (downPressed) { if (editOledBrightness > 5)   editOledBrightness = (uint8_t)max<int>(5, editOledBrightness - 5); else editOledBrightness = 5; }
+        if (starPressed) { editOledBrightness = appliedOledBrightness; if (editOledBrightness < 5) editOledBrightness = 5; mode = Mode::ROOT; return; }
+        if (hashPressed) { if (editOledBrightness < 5) editOledBrightness = 5; brightSavePending = true; appliedOledBrightness = editOledBrightness; mode = Mode::ROOT; return; }
     } else if (mode == Mode::PAIRING) {
         auto *comm = CommManager::get();
-        bool discovering = comm && comm->isDiscovering();
-        // Hash pressed: toggle scanning or pair with selected when not scanning
-        if (hashPressed) {
-            if (discovering) {
-                comm->stopDiscovery();
+        if (!comm) { if (starPressed) { mode = Mode::ROOT; } return; }
+        // Ensure discovery runs continuously on this screen
+        if (!comm->isDiscovering()) comm->startDiscovery(0);
+        int discCount = comm->getDiscoveredCount();
+        // Up/Down navigate discovered list (wrap)
+        if (upPressed && discCount>0) {
+            if (pairingSelIndex > 0) pairingSelIndex--; else pairingSelIndex = discCount-1;
+        }
+        if (downPressed && discCount>0) {
+            if (pairingSelIndex < discCount-1) pairingSelIndex++; else pairingSelIndex = 0;
+        }
+        if (pairingSelIndex >= discCount) pairingSelIndex = discCount>0 ? discCount-1 : 0;
+        // '#' pairs or unpairs the selected device, stays on screen for multiple operations
+        if (hashPressed && discCount>0) {
+            const auto &d = comm->getDiscovered(pairingSelIndex);
+            int pairedIdx = comm->findPairedIndexByMac(d.mac);
+            if (pairedIdx >= 0) {
+                // Unpair
+                comm->unpairByMac(d.mac);
             } else {
-                if (comm->getDiscoveredCount() > 0) {
-                    comm->pairWithIndex(pairingSelIndex);
-                    // After pairing, exit menu (could instead go to Select Active later)
-                    exitMenu();
-                } else {
-                    comm->startDiscovery();
-                }
+                // Pair
+                comm->pairWithIndex(pairingSelIndex);
             }
             return;
         }
-        if (!discovering) {
-            // Navigate list only when not actively scanning
-            if (upPressed && comm && comm->getDiscoveredCount()>0) {
-                if (pairingSelIndex > 0) pairingSelIndex--; else pairingSelIndex = comm->getDiscoveredCount()-1;
-            }
-            if (downPressed && comm && comm->getDiscoveredCount()>0) {
-                if (pairingSelIndex < comm->getDiscoveredCount()-1) pairingSelIndex++; else pairingSelIndex = 0;
-            }
-            // Clamp in case list shrank
-            if (comm && pairingSelIndex >= comm->getDiscoveredCount()) pairingSelIndex = comm->getDiscoveredCount()>0 ? comm->getDiscoveredCount()-1 : 0;
-        }
-        if (starPressed) { if (discovering && comm) comm->stopDiscovery(); mode = Mode::ROOT; return; }
+        if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::MANAGE_DEVICES) {
         // Manage Devices: Up/Down navigate paired device list
         auto *comm = CommManager::get();
@@ -158,15 +175,28 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
         }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::EDIT_NAME) {
-        // Name editor: small font per-char editing, with hold-to-repeat like timers
+        // Name editor: small font per-char editing, extended charset with hold-to-repeat
         auto *comm = CommManager::get();
         unsigned long nowMs = millis();
         static unsigned long nameHoldStartUp = 0, nameHoldStartDown = 0, nameLastRepeatMs = 0;
+        // Character set order: space, 0-9, A-Z, a-z
+        static const char* CHARSET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        static const int CHARSET_LEN = 1 + 10 + 26 + 26;
+        auto nextChar=[&](char c){
+            // Default to space if unknown
+            int idx = 0;
+            for (int i=0;i<CHARSET_LEN;i++){ if (CHARSET[i]==c){ idx=i; break; } }
+            return CHARSET[(idx+1)%CHARSET_LEN];
+        };
+        auto prevChar=[&](char c){
+            int idx = 0;
+            for (int i=0;i<CHARSET_LEN;i++){ if (CHARSET[i]==c){ idx=i; break; } }
+            return CHARSET[(idx-1+CHARSET_LEN)%CHARSET_LEN];
+        };
         auto applyChar=[&](int dir){
             char &ch = renameBuf[renamePos];
-            if (ch==0) ch='A';
-            if (dir>0) { if (ch=='Z') ch=' '; else if (ch==' ') ch='A'; else ch++; }
-            else { if (ch=='A') ch=' '; else if (ch==' ') ch='Z'; else ch--; }
+            if (ch==0) ch=' ';
+            ch = (dir>0) ? nextChar(ch) : prevChar(ch);
         };
         if (upPressed)   { applyChar(+1); nameHoldStartUp = nowMs; nameLastRepeatMs = 0; return; }
         if (downPressed) { applyChar(-1); nameHoldStartDown = nowMs; nameLastRepeatMs = 0; return; }
@@ -180,12 +210,24 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 }
             }
         } else { nameLastRepeatMs = 0; }
+        // '#' short press: move right; at end -> save and exit. Long-press: move left
         if (hashPressed) {
-            if (renamePos < (int)sizeof(renameBuf)-2) { renamePos++; if (renameBuf[renamePos]==0) renameBuf[renamePos]='A'; return; }
+            if (renamePos < (int)sizeof(renameBuf)-2) { renamePos++; if (renameBuf[renamePos]==0) renameBuf[renamePos]=' '; return; }
             if (comm) comm->setActiveName(renameBuf);
             mode = Mode::ROOT; return;
         }
-        if (starPressed) { if (renamePos>0) { renameBuf[renamePos]=0; renamePos--; } else { mode = Mode::ROOT; } return; }
+        if (hashLongPressed && !hashPressed) { // long hold -> move left
+            if (renamePos > 0) renamePos--; else {
+                // wrap to last non-NUL position
+                int last=0; for (int i=0; i<(int)sizeof(renameBuf)-1; ++i) { if (renameBuf[i]==0) break; last=i; }
+                renamePos = last;
+            }
+            return;
+        }
+        if (starPressed) {
+            // STAR cancels/returns: exit without saving
+            mode = Mode::ROOT; return;
+        }
     } else if (mode == Mode::SELECT_ACTIVE) {
         // Navigate paired device list (DeviceManager consulted only for count via external code / DisplayManager)
         // We can't access DeviceManager directly here without coupling; we rely on main/Display to clamp.
@@ -199,10 +241,20 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             // Trigger selection consumption in main loop
             activeSelectTriggered = true;
             activeSelectIndexPending = activeSelIndex;
-            exitMenu();
+            if (selectActiveReturnToMain) {
+                // Exit to main screen (leave inMenu=false)
+                inMenu = false; mode = Mode::ROOT; menuExitTime = millis();
+            } else {
+                // Return to menu root
+                mode = Mode::ROOT;
+            }
             return;
         }
-        if (starPressed) { mode = Mode::ROOT; return; }
+        if (starPressed) {
+            if (selectActiveReturnToMain) { inMenu = false; mode = Mode::ROOT; menuExitTime = millis(); }
+            else { mode = Mode::ROOT; }
+            return;
+        }
     } else if (mode == Mode::SHOW_RSSI) {
         auto *comm = CommManager::get();
         int count = comm ? comm->getPairedCount() : 0;
@@ -219,12 +271,19 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
     } else if (mode == Mode::BATTERY_CALIB) {
         // Initialize lazily when entering (main will seed values)
         // Up/Down adjust current calibration point
-        if (upPressed) { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); }
-        if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); }
-        // '*' cycles index 0->1->2
-        if (starPressed) { editCalibIndex = (editCalibIndex + 1) % 3; }
-        // '#' saves
-        if (hashPressed) { calibSavePending = true; }
+        if (!calibInProgress) {
+            // First '#' starts the calibration editing session
+            if (hashPressed) { calibInProgress = true; return; }
+            if (starPressed) { mode = Mode::ROOT; return; }
+            // Ignore other keys until started
+        } else {
+            if (upPressed) { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); }
+            if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); }
+            // '*' cycles index 0->1->2
+            if (starPressed) { editCalibIndex = (editCalibIndex + 1) % 3; }
+            // '#' saves
+            if (hashPressed) { calibSavePending = true; }
+        }
         // Long-press hash can exit
         if (hashLongPressed && !hashPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::EDIT_TIMERS) {
@@ -266,15 +325,27 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             editLastRepeatMs = 0;
         }
         if (hashPressed) {
-            // Move to next digit; if beyond last, save and exit
+            // Move to next digit; if beyond last, clamp to slave bounds, save and exit
             editDigitIndex++;
             if (editDigitIndex >= 2*Defaults::DIGITS) {
                 // Send to active device
                 auto *comm = CommManager::get();
-                if (comm) comm->setActiveTimer((float)editTonTenths/10.0f, (float)editToffTenths/10.0f);
+                // Clamp to slave min/max (tenths) before sending
+                int toff = editToffTenths;
+                int ton  = editTonTenths;
+                if (toff < (int)Defaults::SLAVE_TIMER_MIN_TENTHS) toff = (int)Defaults::SLAVE_TIMER_MIN_TENTHS;
+                if (toff > (int)Defaults::SLAVE_TIMER_MAX_TENTHS) toff = (int)Defaults::SLAVE_TIMER_MAX_TENTHS;
+                if (ton  < (int)Defaults::SLAVE_TIMER_MIN_TENTHS) ton  = (int)Defaults::SLAVE_TIMER_MIN_TENTHS;
+                if (ton  > (int)Defaults::SLAVE_TIMER_MAX_TENTHS) ton  = (int)Defaults::SLAVE_TIMER_MAX_TENTHS;
+                if (comm) comm->setActiveTimer((float)ton/10.0f, (float)toff/10.0f);
                 // Exit edit mode completely
                 exitMenu();
             }
+            return;
+        }
+        // Long-press '#' moves cursor left for symmetry
+        if (hashLongPressed && !hashPressed) {
+            if (editDigitIndex > 0) editDigitIndex--; else editDigitIndex = 2*Defaults::DIGITS - 1;
             return;
         }
         if (starPressed) { exitMenu(); return; }
@@ -383,20 +454,21 @@ int MenuSystem::findBlankingIndexFor(int seconds) const {
 
 // --- Other mode helpers ---
 void MenuSystem::enterPairing() {
+    inMenu = true;
     mode = Mode::PAIRING;
     pairingScanning = false;
     pairingSelIndex = 0;
     // Auto-start discovery for better UX
     if (auto *comm = CommManager::get()) {
-        if (!comm->isDiscovering()) comm->startDiscovery();
+        if (!comm->isDiscovering()) comm->startDiscovery(0); // continuous while on screen
     }
 }
-void MenuSystem::enterManageDevices() { mode = Mode::MANAGE_DEVICES; }
+void MenuSystem::enterManageDevices() { inMenu = true; mode = Mode::MANAGE_DEVICES; }
 void MenuSystem::enterRename() { mode = Mode::RENAME_DEVICE; renameInEdit = false; }
 void MenuSystem::enterEditName(const char* initialName) {
     inMenu = true; mode = Mode::EDIT_NAME; strncpy(renameBuf, initialName, sizeof(renameBuf)-1); renameBuf[sizeof(renameBuf)-1]=0; renamePos = 0;
 }
-void MenuSystem::enterSelectActive() { mode = Mode::SELECT_ACTIVE; }
+void MenuSystem::enterSelectActive(bool returnToMain) { inMenu = true; mode = Mode::SELECT_ACTIVE; selectActiveReturnToMain = returnToMain; }
 void MenuSystem::enterShowRssi() {
     mode = Mode::SHOW_RSSI;
     if (auto *comm = CommManager::get()) comm->requestStatusActive();
@@ -409,4 +481,16 @@ void MenuSystem::enterEditTimers(float tonSecInit, float toffSecInit) {
     editTonTenths = (int)roundf(tonSecInit * 10.0f); if (editTonTenths<0) editTonTenths=0; if (editTonTenths>99999) editTonTenths=99999;
     editToffTenths = (int)roundf(toffSecInit * 10.0f); if (editToffTenths<0) editToffTenths=0; if (editToffTenths>99999) editToffTenths=99999;
     editDigitIndex = 0;
+}
+
+void MenuSystem::enterTxPower() {
+    mode = Mode::EDIT_TXPOWER;
+    // Seed edit value from applied so the UI starts at the current setting
+    editTxPowerQdbm = appliedTxPowerQdbm;
+}
+
+void MenuSystem::enterBrightness() {
+    mode = Mode::EDIT_BRIGHTNESS;
+    // Seed edit value from applied so the UI starts at the current setting
+    editOledBrightness = appliedOledBrightness;
 }

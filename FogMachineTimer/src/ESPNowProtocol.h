@@ -8,7 +8,7 @@ struct __attribute__((packed)) ESPNowMsg {
   int8_t rssi; // optional
   uint32_t offTime; // tenths
   uint32_t onTime;  // tenths
-  char name[24];
+  char name[10];
   uint8_t batteryPercent; // 0..100
   uint16_t calibAdc[3]; // optional: raw ADC calibration points (0..4095)
 };

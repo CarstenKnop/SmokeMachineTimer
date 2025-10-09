@@ -7,7 +7,7 @@
 // EEPROM layout (simple, not wear-levelled):
 // [0] count (uint8)
 // [1] activeIndex (int8, -1 if none) -> store as uint8_t with 255 meaning -1
-// Then per device: mac[6], name[16]
+// Then per device: mac[6], name[10]
 // NOTE: Extend later for additional persisted fields.
 
 static constexpr int EEPROM_ADDR_COUNT = 0;
@@ -27,8 +27,8 @@ void DeviceManager::loadFromEEPROM() {
     int base = EEPROM_ADDR_DEVICES;
     for (int i = 0; i < count; ++i) {
         SlaveDevice dev = {};
-        EEPROM.get(base, dev.mac); base += 6;
-        EEPROM.get(base, dev.name); base += 16;
+    EEPROM.get(base, dev.mac); base += 6;
+    EEPROM.get(base, dev.name); base += 10;
         devices.push_back(dev);
     }
     activeIndex = (activeRaw == 255) ? -1 : (int)activeRaw;
@@ -42,8 +42,8 @@ void DeviceManager::saveToEEPROM() {
     EEPROM.put(EEPROM_ADDR_ACTIVE, activeRaw);
     int base = EEPROM_ADDR_DEVICES;
     for (int i = 0; i < count; ++i) {
-        EEPROM.put(base, devices[i].mac); base += 6;
-        EEPROM.put(base, devices[i].name); base += 16;
+    EEPROM.put(base, devices[i].mac); base += 6;
+    EEPROM.put(base, devices[i].name); base += 10;
     }
     EEPROM.commit();
 }

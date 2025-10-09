@@ -2,57 +2,62 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Build FogMachineRemoteControl (PIO)",
+			"label": "PIO: Build (python -m platformio)",
 			"type": "shell",
-			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"command": "python",
+			"args": [
+				"-m",
+				"platformio",
+				"run",
+				"-d",
+				"${workspaceFolder}\\FogMachineRemoteControl"
+			],
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
+		},
+		{
+			"label": "PIO: Build (pio in PATH)",
+			"type": "shell",
+			"command": "pio",
 			"args": [
 				"run",
 				"-d",
-				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
+				"${workspaceFolder}\\FogMachineRemoteControl"
 			],
 			"problemMatcher": [
-				"$gcc"
-			]
+				"$platformio"
+			],
+			"group": "build"
+		},
+		{
+			"label": "PIO: Build (PlatformIO Core venv)",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-d",
+				"${workspaceFolder}\\FogMachineRemoteControl"
+			],
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
 		},
 		{
 			"label": "Build FogMachineRemoteControl (PIO)",
 			"type": "shell",
-			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"command": "pio",
 			"args": [
 				"run",
 				"-d",
-				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl",
-				"-v"
+				"${workspaceFolder}\\FogMachineRemoteControl"
 			],
 			"problemMatcher": [
-				"$gcc"
-			]
-		},
-		{
-			"label": "Rebuild FogMachineRemoteControl (PIO)",
-			"type": "shell",
-			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
-			"args": [
-				"run",
-				"-d",
-				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
+				"$platformio"
 			],
-			"problemMatcher": [
-				"$gcc"
-			]
-		},
-		{
-			"label": "Build FogMachineRemoteControl (PIO)",
-			"type": "shell",
-			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
-			"args": [
-				"run",
-				"-d",
-				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
-			],
-			"problemMatcher": [
-				"$gcc"
-			]
+			"group": "build"
 		}
 	]
 }

@@ -8,6 +8,7 @@
 #include "Pins.h"
 #include <esp_wifi.h>
 #include "Defaults.h"
+#include <esp_wifi_types.h>
 
 // Status request helpers (reuse PAIR command as a lightweight status poll)
 void CommManager::requestStatus(const SlaveDevice& dev) {
@@ -104,14 +105,46 @@ void CommManager::loop() {
             broadcastDiscovery();
             lastDiscoveryPing = now;
         }
-        // Early finish: if at least one device found and >2500ms elapsed, stop automatically
-        if (discovered.size() > 0 && now + 1 >= discoveryEnd - (discovering ? 5500 : 0)) {
-            // DiscoveryEnd originally = now + duration; we approximate mid scan; just finish
+        // Continuous discovery: when discoveryEnd is max, keep running while in the screen
+        if (discoveryEnd != UINT32_MAX && now >= discoveryEnd) {
             finishDiscovery();
         }
-        if (now >= discoveryEnd) {
-            finishDiscovery();
-        }
+    }
+}
+
+void CommManager::setRssiSnifferEnabled(bool enable) {
+    if (enable == snifferEnabled) return;
+    snifferEnabled = enable;
+    if (enable) {
+        // Enable promiscuous mode to receive packet RSSI
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_promiscuous_rx_cb(&CommManager::wifiSniffer);
+    } else {
+        esp_wifi_set_promiscuous_rx_cb(nullptr);
+        esp_wifi_set_promiscuous(false);
+    }
+}
+
+// Static sniffer callback
+void CommManager::wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if (!instance) return;
+    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA) return;
+    const wifi_promiscuous_pkt_t* pkt = (const wifi_promiscuous_pkt_t*)buf;
+    if (!pkt) return;
+    const int8_t rssi = pkt->rx_ctrl.rssi;
+    const uint8_t* mac = pkt->payload + 10; // addr2 in 802.11 header (source MAC)
+    // Basic sanity: payload len must be large enough to contain header
+    if (pkt->rx_ctrl.sig_len < 16) return;
+    instance->noteRssiFromMac(mac, rssi);
+}
+
+void CommManager::noteRssiFromMac(const uint8_t mac[6], int8_t rssi) {
+    // If MAC matches any paired device, update its rssiRemote
+    int idx = deviceManager.findDeviceByMac(mac);
+    if (idx >= 0) {
+        SlaveDevice dev = deviceManager.getDevice(idx);
+        dev.rssiRemote = rssi;
+        deviceManager.updateStatus(idx, dev);
     }
 }
 
@@ -153,13 +186,14 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
         if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
             instance->ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     }
-    if (len < (int)sizeof(ProtocolMsg)) return;
-    ProtocolMsg msg;
-    memcpy(&msg, data, sizeof(msg));
+    // Copy with exact current protocol size (no backward-compat per request)
+    ProtocolMsg msg = {};
+    if (len < (int)sizeof(ProtocolMsg)) { Serial.println("[COMM] Dropping short packet"); return; }
+    memcpy(&msg, data, sizeof(ProtocolMsg));
     Serial.printf("[COMM] RX cmd=%u from %02X:%02X:%02X:%02X:%02X:%02X len=%d\n", (unsigned)msg.cmd, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], len);
     if (!instance) return;
     // For now we treat incoming STATUS (and PAIR replies) the same: update discovered or paired device.
-    int8_t rssi = -70; // Placeholder (IDF <5 API); could be improved using custom recv info if available.
+    int8_t rssi = -70; // TODO: Replace with real RSSI if available from RX metadata
     // If discovering, collect in discovered list
     if (instance->discovering) {
         instance->addOrUpdateDiscovered(mac, msg.name, rssi, msg.ton, msg.toff);
@@ -179,9 +213,15 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
         dev.toff = msg.toff;
     dev.outputState = msg.outputOverride;
     dev.elapsed = msg.elapsed;
-        dev.rssiRemote = rssi;
-        dev.rssiSlave = rssi; // placeholder
-        if (msg.name[0]) { strncpy(dev.name, msg.name, sizeof(dev.name)-1); dev.name[sizeof(dev.name)-1] = '\0'; }
+    // Update RSSI estimates: remote side (placeholder) and timer-provided RSSI
+    dev.rssiRemote = rssi; // TODO: replace with real RX RSSI if available
+    // RSSI robustness: treat -127 as invalid; keep last-good for a grace window handled by UI; still store value
+            // Update timer-side RSSI only if valid (avoid overwriting with -127 blips)
+            if (msg.rssiAtTimer > -120) {
+                dev.rssiSlave = msg.rssiAtTimer; // value measured at timer
+            }
+    // Reflect name
+    if (msg.name[0]) { strncpy(dev.name, msg.name, sizeof(dev.name)-1); dev.name[sizeof(dev.name)-1] = '\0'; }
         dev.lastStatusMs = millis();
         instance->deviceManager.updateStatus(idx, dev);
     }
@@ -189,7 +229,11 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
 
 void CommManager::startDiscovery(uint32_t durationMs) {
     discovering = true;
-    discoveryEnd = millis() + durationMs;
+    if (durationMs == 0) {
+        discoveryEnd = UINT32_MAX; // run continuously until explicitly stopped
+    } else {
+        discoveryEnd = millis() + durationMs;
+    }
     lastDiscoveryPing = 0;
     discovered.clear();
     broadcastDiscovery();
@@ -269,6 +313,12 @@ void CommManager::setActiveName(const char* newName) {
     const SlaveDevice* act = deviceManager.getActive(); if (!act) return;
     ProtocolMsg msg={}; msg.cmd = (uint8_t)ProtocolCmd::SET_NAME; strncpy(msg.name, newName, sizeof(msg.name)-1);
     esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
+    // Update local device name immediately for consistent UI reflection
+    int idx = deviceManager.getActiveIndex();
+    if (idx >= 0) {
+        // Persist rename so it survives remote reboot
+        deviceManager.renameDevice(idx, newName);
+    }
 }
 
 void CommManager::setActiveTimer(float tonSec, float toffSec) {

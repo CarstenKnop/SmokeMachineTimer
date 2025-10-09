@@ -32,12 +32,20 @@ public:
     bool justSelected() const { return lastSelectTime && (millis() - lastSelectTime < 400); }
     const char* getLastActionLabel() const { return lastActionLabel; }
     // Editing helpers / modes
-    enum class Mode { ROOT, EDIT_BLANKING, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
+    enum class Mode { ROOT, EDIT_BLANKING, EDIT_TXPOWER, EDIT_BRIGHTNESS, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
     enum class ConfirmAction { NONE, RESET_SLAVE, RESET_REMOTE };
     bool isEditing() const { return mode != Mode::ROOT; }
     bool isEditingBlanking() const { return mode == Mode::EDIT_BLANKING; }
+    bool isEditingTxPower() const { return mode == Mode::EDIT_TXPOWER; }
+    bool isEditingBrightness() const { return mode == Mode::EDIT_BRIGHTNESS; }
     int getEditingBlankingSeconds() const { return blankingOptions[blankingIndex]; }
     int getAppliedBlankingSeconds() const { return appliedBlankingSeconds; }
+    int8_t getAppliedTxPowerQdbm() const { return appliedTxPowerQdbm; }
+    uint8_t getAppliedOledBrightness() const { return appliedOledBrightness; }
+    int8_t getEditingTxPowerQdbm() const { return editTxPowerQdbm; }
+    uint8_t getEditingOledBrightness() const { return editOledBrightness; }
+    void setAppliedTxPowerQdbm(int8_t v) { appliedTxPowerQdbm = v; }
+    void setAppliedOledBrightness(uint8_t v) { appliedOledBrightness = v; }
     // Placeholder mode state queries
     // Access current mode
     Mode getMode() const { return mode; }
@@ -97,6 +105,7 @@ private:
     int activeSelIndex = 0; // index navigating paired devices
     bool activeSelectTriggered = false; // set true when user confirms selection
     int activeSelectIndexPending = -1;  // which index was chosen
+    bool selectActiveReturnToMain = false; // when true, exiting SELECT_ACTIVE returns to main, otherwise returns to menu root
     int manageSelIndex = 0; // selection inside Manage Devices
 public:
     int getPairingSelection() const { return pairingSelIndex; }
@@ -110,18 +119,21 @@ public:
     ConfirmAction getConfirmAction() const { return confirmAction; }
     // Rename editing state
     bool renameInEdit = false;
-    char renameBuf[16] = {0};
+    char renameBuf[10] = {0}; // 9 + NUL
     int renamePos = 0; // index within renameBuf being edited
     // moved to consolidated calibration state section below
     int getManageSelection() const { return manageSelIndex; }
     void setManageSelection(int v) { manageSelIndex = v; }
     // Mode entry helpers for other items
     void enterPairing();
-    void enterManageDevices();
+    void enterManageDevices(); // deprecated (no longer used)
     void enterRename();
     void enterEditName(const char* initialName);
-    void enterSelectActive();
+    // Enter Active Timer selection; if returnToMain=true, exit returns to main screen, else to menu
+    void enterSelectActive(bool returnToMain = false);
     void enterShowRssi();
+    void enterTxPower();
+    void enterBrightness();
     void enterBatteryCal();
     void enterEditTimers(float tonSecInit, float toffSecInit);
     // Battery calibration helpers (UI state only)
@@ -132,6 +144,16 @@ public:
     void startBlankingEdit();
     void cancelBlankingEdit();
     void confirmBlankingEdit(bool exitMenuAfter = false);
+    bool consumeTxPowerSave(int8_t &outQdbm) { if (!txSavePending) return false; txSavePending=false; outQdbm = editTxPowerQdbm; return true; }
+    bool consumeBrightnessSave(uint8_t &outLvl) { if (!brightSavePending) return false; brightSavePending=false; outLvl = editOledBrightness; return true; }
+    // WiFi TX power (qdbm, 0.25 dBm units)
+    int8_t editTxPowerQdbm = 84;
+    int8_t appliedTxPowerQdbm = 84;
+    bool txSavePending = false;
+    // OLED brightness (0..255)
+    uint8_t editOledBrightness = 255;
+    uint8_t appliedOledBrightness = 255;
+    bool brightSavePending = false;
     int findBlankingIndexFor(int seconds) const;
     void clampScroll();
     // --- Edit timers state ---

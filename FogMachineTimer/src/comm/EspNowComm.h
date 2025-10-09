@@ -5,6 +5,7 @@
 #include "protocol/Protocol.h"
 #include "timer/TimerController.h"
 #include "config/DeviceConfig.h"
+#include <esp_wifi_types.h>
 
 class EspNowComm {
 public:
@@ -20,4 +21,8 @@ private:
     void sendStatus(const uint8_t* mac);
     void processCommand(const ProtocolMsg& msg, const uint8_t* mac);
     static EspNowComm* instance;
+    // RSSI capture via promiscuous callback
+    static void wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type);
+    static volatile int8_t lastRxRssi;
+    static uint8_t lastSenderMac[6];
 };

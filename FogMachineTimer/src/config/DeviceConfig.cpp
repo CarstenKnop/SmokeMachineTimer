@@ -17,7 +17,7 @@ void DeviceConfig::begin(size_t eepromSize) {
         strncpy(name, "FogTimer", sizeof(name)-1);
         EEPROM.put(0, ton);
         EEPROM.put(sizeof(float), toff);
-        EEPROM.put(sizeof(float)*2, name);
+            EEPROM.put(sizeof(float)*2, name);
         magic = EEPROM_MAGIC;
         EEPROM.put(EEPROM_MAGIC_ADDR, magic);
         EEPROM.commit();
@@ -28,7 +28,7 @@ void DeviceConfig::begin(size_t eepromSize) {
 void DeviceConfig::load() {
     EEPROM.get(0, ton);
     EEPROM.get(sizeof(float), toff);
-    EEPROM.get(sizeof(float)*2, name);
+        EEPROM.get(sizeof(float)*2, name);
     if (ton < 0.1f || ton > 3600.0f) ton = 0.1f;
     if (toff < 0.1f || toff > 3600.0f) toff = 10.0f;
     if (name[0] == '\0') strncpy(name, "FogTimer", sizeof(name)-1);

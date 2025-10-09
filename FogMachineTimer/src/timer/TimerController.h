@@ -12,6 +12,7 @@ public:
     void overrideOutput(bool on);
     void resetState();
     void toggleAndReset();
+        bool consumeStateChanged();
     bool isOutputOn() const;
     float getTon() const;
     float getToff() const;
@@ -23,4 +24,5 @@ private:
     bool outputState;
     unsigned long lastSwitch;
     float currentStateSeconds;
+        bool stateChangedFlag=false;
 };

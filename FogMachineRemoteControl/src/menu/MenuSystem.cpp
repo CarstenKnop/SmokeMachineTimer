@@ -2,6 +2,8 @@
 // Handles menu navigation and animated transitions.
 #include "MenuSystem.h"
 #include "comm/CommManager.h"
+#include "Defaults.h"
+#include <math.h>
 
 // Basic parameters for UI behavior
 static constexpr int VISIBLE_LINES = 5;      // number of menu lines shown
@@ -14,6 +16,7 @@ MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), sc
         {"Manage Devices"},
         {"Rename Device"},
         {"Select Active"},
+        {"Edit Timers"},
         {"Show RSSI"},
         {"Battery Calibration"},
         {"Display Blanking"}
@@ -23,8 +26,9 @@ MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), sc
 void MenuSystem::begin() {
     selectedIndex = 0; inMenu = false; scrollOffset = 0; lastNavTime = 0; lastSelectTime = 0; lastActionLabel = nullptr;}
 
-void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed) {
-    if (!inMenu) return;
+void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed, bool upHeld, bool downHeld) {
+    // Always process when editing timers to keep keys responsive, even if we eventually render over main screen
+    if (!inMenu && mode != Mode::EDIT_TIMERS) return;
     unsigned long now = millis();
     (void)hashLongPressed; // intentionally unused here
     if (mode == Mode::ROOT) {
@@ -59,6 +63,14 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 enterRename();
             } else if (strcmp(label, "Select Active") == 0) {
                 enterSelectActive();
+            } else if (strcmp(label, "Edit Timers") == 0) {
+                auto *comm = CommManager::get();
+                float ton=1.0f, toff=1.0f;
+                if (comm) {
+                    const SlaveDevice* act = comm->getActiveDevice();
+                    if (act) { ton = act->ton; toff = act->toff; }
+                }
+                enterEditTimers(ton, toff);
             } else if (strcmp(label, "Show RSSI") == 0) {
                 enterShowRssi();
             } else if (strcmp(label, "Battery Calibration") == 0) {
@@ -175,6 +187,57 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
     } else if (mode == Mode::BATTERY_CALIB) {
         if (hashPressed) { calibInProgress = !calibInProgress; return; }
         if (starPressed) { calibInProgress = false; mode = Mode::ROOT; return; }
+    } else if (mode == Mode::EDIT_TIMERS) {
+        // Edit two timer values in tenths: first TOFF digits [0..DIGITS-1], then TON digits [DIGITS..2*DIGITS-1]
+        auto tweakDigit=[&](int &tenths, int whichDigit, int delta){
+            // whichDigit 0..(Defaults::DIGITS-1) with 0=most significant
+            // Change only that digit (wrap within 0..9), no carry to other digits
+            int pow10 = 1;
+            for (int i=0;i<Defaults::DIGITS-whichDigit-1;i++) pow10 *= 10; // digit place weight
+            int digit = (tenths / pow10) % 10;
+            digit = (digit + delta) % 10; if (digit < 0) digit += 10;
+            // Clear that digit and set new value
+            tenths = tenths - ((tenths / pow10) % 10) * pow10 + digit * pow10;
+            if (tenths < 0) tenths = 0; if (tenths > 99999) tenths = 99999;
+        };
+        int which = editDigitIndex;
+        bool editingToff = (which < Defaults::DIGITS);
+        int digitIn = editingToff ? which : (which - Defaults::DIGITS);
+        auto applyStep=[&](int s){ if (editingToff) tweakDigit(editToffTenths, digitIn, s); else tweakDigit(editTonTenths, digitIn, s); };
+        // Edge presses
+        if (upPressed)   { applyStep(+1); editHoldStartUp = now; editLastRepeatMs = 0; return; }
+        if (downPressed) { applyStep(-1); editHoldStartDown = now; editLastRepeatMs = 0; return; }
+        // Hold-to-repeat
+        bool anyHeld = false;
+        if (upHeld)   { anyHeld = true; if (editHoldStartUp==0) editHoldStartUp=now; }
+        else editHoldStartUp = 0;
+        if (downHeld) { anyHeld = true; if (editHoldStartDown==0) editHoldStartDown=now; }
+        else editHoldStartDown = 0;
+        if (anyHeld) {
+            unsigned long start = editHoldStartUp ? editHoldStartUp : editHoldStartDown;
+            if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
+                if (editLastRepeatMs==0 || (now - editLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
+                    if (upHeld) applyStep(+1); if (downHeld) applyStep(-1);
+                    editLastRepeatMs = now;
+                    return;
+                }
+            }
+        } else {
+            editLastRepeatMs = 0;
+        }
+        if (hashPressed) {
+            // Move to next digit; if beyond last, save and exit
+            editDigitIndex++;
+            if (editDigitIndex >= 2*Defaults::DIGITS) {
+                // Send to active device
+                auto *comm = CommManager::get();
+                if (comm) comm->setActiveTimer((float)editTonTenths/10.0f, (float)editToffTenths/10.0f);
+                // Exit edit mode completely
+                exitMenu();
+            }
+            return;
+        }
+        if (starPressed) { exitMenu(); return; }
     }
     // Housekeeping: turn off scroll animation if elapsed
     if (scrollAnimActive && (millis() - scrollAnimStart >= SCROLL_ANIM_MS)) scrollAnimActive = false;
@@ -272,3 +335,11 @@ void MenuSystem::enterRename() { mode = Mode::RENAME_DEVICE; renameInEdit = fals
 void MenuSystem::enterSelectActive() { mode = Mode::SELECT_ACTIVE; }
 void MenuSystem::enterShowRssi() { mode = Mode::SHOW_RSSI; }
 void MenuSystem::enterBatteryCal() { mode = Mode::BATTERY_CALIB; calibInProgress = false; }
+void MenuSystem::enterEditTimers(float tonSecInit, float toffSecInit) {
+    inMenu = true; // treat as a modal to capture input reliably
+    mode = Mode::EDIT_TIMERS;
+    // Convert to tenths and clamp 0..99999
+    editTonTenths = (int)roundf(tonSecInit * 10.0f); if (editTonTenths<0) editTonTenths=0; if (editTonTenths>99999) editTonTenths=99999;
+    editToffTenths = (int)roundf(toffSecInit * 10.0f); if (editToffTenths<0) editToffTenths=0; if (editToffTenths>99999) editToffTenths=99999;
+    editDigitIndex = 0;
+}

@@ -19,6 +19,7 @@ struct __attribute__((packed)) ProtocolMsg {
     uint8_t cmd; // ProtocolCmd
     float ton;
     float toff;
+    float elapsed;        // seconds elapsed in current state (for TIME row)
     char name[16];
     bool outputOverride;
     bool resetState;

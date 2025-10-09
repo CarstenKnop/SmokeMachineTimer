@@ -21,4 +21,5 @@ private:
     void drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const;
     void drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const;
     void drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const;
+    void drawTimerRow(int tenths, int y, const char* label, int startX = 10) const;
 };

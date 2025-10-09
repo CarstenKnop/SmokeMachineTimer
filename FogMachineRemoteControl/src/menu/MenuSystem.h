@@ -14,7 +14,7 @@ public:
     MenuSystem();
     void begin();
     // Note: hashLongPressed is no longer used for menu entry gating; kept for internal edit flows if needed.
-    void update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed);
+    void update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed, bool upHeld, bool downHeld);
     void enterMenu();
     void exitMenu();
     void nextItem(); // legacy
@@ -32,7 +32,7 @@ public:
     bool justSelected() const { return lastSelectTime && (millis() - lastSelectTime < 400); }
     const char* getLastActionLabel() const { return lastActionLabel; }
     // Editing helpers / modes
-    enum class Mode { ROOT, EDIT_BLANKING, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB };
+    enum class Mode { ROOT, EDIT_BLANKING, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS };
     bool isEditing() const { return mode != Mode::ROOT; }
     bool isEditingBlanking() const { return mode == Mode::EDIT_BLANKING; }
     int getEditingBlankingSeconds() const { return blankingOptions[blankingIndex]; }
@@ -43,6 +43,7 @@ public:
     bool pairingActive() const { return mode == Mode::PAIRING && pairingScanning; }
     bool renameEditing() const { return mode == Mode::RENAME_DEVICE && renameInEdit; }
     bool batteryCalActive() const { return mode == Mode::BATTERY_CALIB && calibInProgress; }
+    bool editingTimers() const { return mode == Mode::EDIT_TIMERS; }
     // Selection animation helpers
     int getPrevSelectedIndex() const { return prevSelectedIndex; }
     unsigned long getLastSelectionChangeTime() const { return lastSelectionChangeTime; }
@@ -105,9 +106,22 @@ public:
     void enterSelectActive();
     void enterShowRssi();
     void enterBatteryCal();
+    void enterEditTimers(float tonSecInit, float toffSecInit);
     void startBlankingEdit();
     void cancelBlankingEdit();
     void confirmBlankingEdit(bool exitMenuAfter = false);
     int findBlankingIndexFor(int seconds) const;
     void clampScroll();
+    // --- Edit timers state ---
+    int editDigitIndex = 0; // 0..(2*Defaults::DIGITS-1); first Defaults::DIGITS are Toff, next are Ton
+    int editToffTenths = 0; // tenths of seconds
+    int editTonTenths = 0;
+    // Repeat state for edit mode
+    unsigned long editHoldStartUp = 0;
+    unsigned long editHoldStartDown = 0;
+    unsigned long editLastRepeatMs = 0;
+public:
+    int getEditDigitIndex() const { return editDigitIndex; }
+    int getEditToffTenths() const { return editToffTenths; }
+    int getEditTonTenths() const { return editTonTenths; }
 };

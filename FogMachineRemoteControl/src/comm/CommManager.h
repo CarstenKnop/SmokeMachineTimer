@@ -2,7 +2,9 @@
 // Handles ESP-NOW communication and protocol command processing.
 #pragma once
 #include <Arduino.h>
+#include "Defaults.h"
 #include "device/DeviceManager.h"
+#include "Pins.h"
 #include <vector>
 
 class CommManager {
@@ -30,6 +32,7 @@ public:
     void resetActive();
     void toggleActive();
     void setActiveName(const char* newName);
+    void setActiveTimer(float tonSec, float toffSec);
     // Device management helpers
     const SlaveDevice* getActiveDevice() const { return deviceManager.getActive(); }
     int getPairedCount() const { return deviceManager.getDeviceCount(); }
@@ -41,6 +44,9 @@ private:
     DeviceManager& deviceManager;
     static CommManager* instance;
     unsigned long ledBlinkUntil = 0;
+    // LED helpers respecting polarity
+    inline void commLedOn()  { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? HIGH : LOW); }
+    inline void commLedOff() { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? LOW  : HIGH); }
     void ensurePeer(const uint8_t mac[6]);
     // Discovery state
     bool discovering = false;

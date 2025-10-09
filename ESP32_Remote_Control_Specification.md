@@ -63,6 +63,15 @@ On successful delivery acknowledgment (or timeout), call esp_now_del_peer() to u
 4.2. Message Structure
 All communications will use a standardized struct to ensure consistency between the remote and all slave devices.
 
+4.3. Status Update Strategy (Push + Poll Hybrid)
+- The remote polls the active device periodically and on user actions (e.g., after Select/Reset/Toggle/Set Timer).
+- Slaves must proactively push a STATUS packet to the remote on significant state changes:
+   - Output state transitions (OFF->ON or ON->OFF)
+   - Timer value changes applied (SET_TIMER)
+   - Name changes (SET_NAME)
+- For many slaves in the environment, push traffic is bounded because only the selected/active device typically changes frequently; background devices send rare updates (at state transitions).
+- The remote de-duplicates rapid identical STATUS packets within a short window (e.g., 150 ms) to avoid display thrash.
+
 5. Pairing and Device Management
 The remote will feature a user-friendly system for discovering, pairing, and managing slave devices.
 

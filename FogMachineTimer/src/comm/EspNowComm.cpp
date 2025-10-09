@@ -24,7 +24,8 @@ void EspNowComm::begin() {
 }
 
 void EspNowComm::loop() {
-    // No periodic actions needed for slave
+    // Push status to the last known sender when the output state changes
+    pushStatusIfStateChanged();
 }
 
 int8_t EspNowComm::getRssi() const {
@@ -44,6 +45,7 @@ void EspNowComm::sendStatus(const uint8_t* mac) {
     reply.cmd = (uint8_t)ProtocolCmd::STATUS;
     reply.ton = config.getTon();
     reply.toff = config.getToff();
+    reply.elapsed = timer.getCurrentStateSeconds();
     strncpy(reply.name, config.getName(), sizeof(reply.name)-1);
     reply.outputOverride = timer.isOutputOn();
     reply.resetState = false;
@@ -87,5 +89,25 @@ void EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
             break;
         default:
             break;
+    }
+}
+
+void EspNowComm::pushStatusIfStateChanged() {
+    if (!instance) return;
+    if (instance->timer.consumeStateChanged()) {
+        // We don't have the remote MAC here; for simplicity, broadcast the status so the active remote can catch it.
+        uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+        ProtocolMsg reply = {};
+        reply.cmd = (uint8_t)ProtocolCmd::STATUS;
+        reply.ton = instance->config.getTon();
+        reply.toff = instance->config.getToff();
+    reply.elapsed = instance->timer.getCurrentStateSeconds();
+        strncpy(reply.name, instance->config.getName(), sizeof(reply.name)-1);
+        reply.outputOverride = instance->timer.isOutputOn();
+        reply.resetState = false;
+        if (!esp_now_is_peer_exist(broadcast)) {
+            esp_now_peer_info_t p = {}; memcpy(p.peer_addr, broadcast, 6); p.channel = 1; p.encrypt = false; esp_now_add_peer(&p);
+        }
+        esp_now_send(broadcast, (uint8_t*)&reply, sizeof(reply));
     }
 }

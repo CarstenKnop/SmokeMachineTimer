@@ -7,11 +7,12 @@
 #include "protocol/Protocol.h"
 #include "Pins.h"
 #include <esp_wifi.h>
+#include "Defaults.h"
 
 // Status request helpers (reuse PAIR command as a lightweight status poll)
 void CommManager::requestStatus(const SlaveDevice& dev) {
     ProtocolMsg msg = {}; msg.cmd = (uint8_t)ProtocolCmd::PAIR; // Interpret at slave as status request when already paired
-    digitalWrite(COMM_OUT_GPIO, HIGH); ledBlinkUntil = millis() + 30;
+    if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW); ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     ensurePeer(dev.mac);
     esp_err_t r = esp_now_send(dev.mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent STATUS-REQ to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", dev.mac[0],dev.mac[1],dev.mac[2],dev.mac[3],dev.mac[4],dev.mac[5], (int)r);
@@ -29,6 +30,8 @@ void CommManager::resetActive() {
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::RESET_STATE;
     ensurePeer(act->mac);
+           if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+        ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     esp_err_t r = esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent RESET to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5], (int)r);
     requestStatus(*act);
@@ -40,6 +43,8 @@ void CommManager::toggleActive() {
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::TOGGLE_STATE;
     ensurePeer(act->mac);
+           if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+        ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     esp_err_t r = esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent TOGGLE to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5], (int)r);
     requestStatus(*act);
@@ -61,12 +66,23 @@ void CommManager::begin() {
         Serial.println("ESP-NOW init failed");
     }
     esp_now_register_recv_cb(CommManager::onDataRecv);
+    // Ensure COMM LED pin is initialized
+    pinMode(COMM_OUT_GPIO, OUTPUT);
+    // Default off (respect polarity)
+    if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, LOW); else digitalWrite(COMM_OUT_GPIO, HIGH);
+    // Power-on blink test (3 pulses)
+    for (int i=0;i<3;i++) {
+        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+        delay(80);
+        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, LOW); else digitalWrite(COMM_OUT_GPIO, HIGH);
+        delay(80);
+    }
 }
 
 void CommManager::loop() {
     // Non-blocking COMM LED blink
     if (ledBlinkUntil && millis() > ledBlinkUntil) {
-    digitalWrite(COMM_OUT_GPIO, LOW);
+        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, LOW); else digitalWrite(COMM_OUT_GPIO, HIGH);
         ledBlinkUntil = 0;
     }
     // Discovery ticking
@@ -94,8 +110,8 @@ void CommManager::sendCommand(const SlaveDevice& dev, uint8_t cmd, const void* p
     // Non-blocking COMM LED blink on send
     // Ensure peer exists before sending
     ensurePeer(dev.mac);
-    digitalWrite(COMM_OUT_GPIO, HIGH);
-    ledBlinkUntil = millis() + 30;
+           if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+        ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     esp_err_t r = esp_now_send(dev.mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent cmd=%u to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", (unsigned)cmd, dev.mac[0],dev.mac[1],dev.mac[2],dev.mac[3],dev.mac[4],dev.mac[5], (int)r);
 }
@@ -109,8 +125,8 @@ void CommManager::broadcastDiscovery() {
         esp_now_peer_info_t p = {}; memcpy(p.peer_addr, broadcast, 6); p.channel = 1; p.encrypt = false; esp_now_add_peer(&p);
         Serial.println("[COMM] Added broadcast peer");
     }
-    digitalWrite(COMM_OUT_GPIO, HIGH);
-    ledBlinkUntil = millis() + 30;
+        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+        ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     esp_err_t r = esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[DISC] Broadcast PAIR sent (%d)\n", (int)r);
 }
@@ -122,8 +138,8 @@ void CommManager::processIncoming() {
 void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     // Non-blocking COMM LED blink on receive
     if (instance) {
-    digitalWrite(COMM_OUT_GPIO, HIGH);
-        instance->ledBlinkUntil = millis() + 30;
+        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+            instance->ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     }
     if (len < (int)sizeof(ProtocolMsg)) return;
     ProtocolMsg msg;
@@ -138,7 +154,10 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     }
     // De-duplicate rapid identical STATUS packets (ton,toff,state) within 150ms
     if (msg.cmd == (uint8_t)ProtocolCmd::STATUS) {
-        if (instance->isDuplicateStatus(mac, msg.ton, msg.toff, msg.outputOverride, millis())) return;
+        if (instance->isDuplicateStatus(mac, msg.ton, msg.toff, msg.outputOverride, millis())) {
+            // even if duplicate, we could still refresh elapsed if desired; keep simple and drop
+            return;
+        }
     }
     // Update existing paired device if present (status fields only, avoid EEPROM write each packet)
     int idx = instance->deviceManager.findDeviceByMac(mac);
@@ -146,7 +165,8 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
         SlaveDevice dev = instance->deviceManager.getDevice(idx);
         dev.ton = msg.ton;
         dev.toff = msg.toff;
-        dev.outputState = msg.outputOverride;
+    dev.outputState = msg.outputOverride;
+    dev.elapsed = msg.elapsed;
         dev.rssiRemote = rssi;
         dev.rssiSlave = rssi; // placeholder
         if (msg.name[0]) { strncpy(dev.name, msg.name, sizeof(dev.name)-1); dev.name[sizeof(dev.name)-1] = '\0'; }
@@ -206,6 +226,8 @@ void CommManager::pairWithIndex(int idx) {
     // Send a follow-up PAIR (status request) directly to ensure state
     ProtocolMsg msg = {}; msg.cmd = (uint8_t)ProtocolCmd::PAIR;
     ensurePeer(d.mac);
+    if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
+    ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
     esp_err_t r = esp_now_send(d.mac, (uint8_t*)&msg, sizeof(msg));
     Serial.printf("[COMM] Sent STATUS-REQ after pair to %02X:%02X:%02X:%02X:%02X:%02X (%d)\n", d.mac[0],d.mac[1],d.mac[2],d.mac[3],d.mac[4],d.mac[5], (int)r);
 }
@@ -235,4 +257,13 @@ void CommManager::setActiveName(const char* newName) {
     const SlaveDevice* act = deviceManager.getActive(); if (!act) return;
     ProtocolMsg msg={}; msg.cmd = (uint8_t)ProtocolCmd::SET_NAME; strncpy(msg.name, newName, sizeof(msg.name)-1);
     esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
+}
+
+void CommManager::setActiveTimer(float tonSec, float toffSec) {
+    const SlaveDevice* act = deviceManager.getActive(); if (!act) return;
+    ProtocolMsg msg={}; msg.cmd = (uint8_t)ProtocolCmd::SET_TIMER; msg.ton = tonSec; msg.toff = toffSec;
+    ensurePeer(act->mac);
+    esp_err_t r = esp_now_send(act->mac, (uint8_t*)&msg, sizeof(msg));
+    Serial.printf("[COMM] Sent SET_TIMER to %02X:%02X:%02X:%02X:%02X:%02X (%.1f/%.1f) (%d)\n", act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5], tonSec, toffSec, (int)r);
+    requestStatus(*act);
 }

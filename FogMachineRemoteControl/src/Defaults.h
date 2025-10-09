@@ -48,6 +48,34 @@ namespace Defaults {
   // General loop pacing (soft delay per loop if needed)
   static constexpr unsigned long LOOP_DELAY_MS = 10;
 
+  // COMM LED: minimum on-time for visibility (ms)
+  static constexpr unsigned long COMM_LED_MIN_ON_MS = 80; // make this longer (e.g., 120) if still not visible
+  // COMM LED polarity (true = active HIGH, false = active LOW)
+  static constexpr bool COMM_LED_ACTIVE_HIGH = true;
+
+  // UI layout (remote)
+  // Timer rows and digits
+  static constexpr int UI_TIMER_START_X   = 26;  // left offset for timer digits
+  static constexpr int UI_TIMER_ROW_Y_OFF = 0;   // OFF row Y
+  static constexpr int UI_TIMER_ROW_Y_ON  = 24;  // ON row Y
+  static constexpr int UI_TIMER_ROW_Y_TIME= 48;  // TIME row Y
+  static constexpr int UI_DIGIT_WIDTH     = 11;  // pixel width per digit in text size 2
+  static constexpr int UI_LABEL_GAP_X     = 10;  // gap after digits before label
+  // State indicator position (the bottom '*')
+  static constexpr int UI_STATE_CHAR_Y    = 48;  // keep at bottom-left; may overlap TIME label minimally
+  // Battery icon position and size (top-left)
+  static constexpr int UI_BATT_X          = 0;
+  static constexpr int UI_BATT_Y          = 0;
+  static constexpr int UI_BATT_W          = 16;  // body width (excludes terminal)
+  static constexpr int UI_BATT_H          = 8;   // body height
+  static constexpr int UI_BATT_TERM_W     = 2;   // terminal width
+  static constexpr int UI_BATT_TERM_H     = 4;   // terminal height
+  // Progress bar geometry
+  static constexpr int UI_PBAR_X          = 0;
+  static constexpr int UI_PBAR_Y          = 48;
+  static constexpr int UI_PBAR_W          = 128;
+  static constexpr int UI_PBAR_H          = 16;
+
   // Version tag (may be overridden later per project release scheme)
   inline const char* VERSION() { return "FogMachineTimer v1.0"; }
 }

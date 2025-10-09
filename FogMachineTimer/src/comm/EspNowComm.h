@@ -11,6 +11,7 @@ public:
     EspNowComm(TimerController& timer, DeviceConfig& config);
     void begin();
     void loop();
+    void pushStatusIfStateChanged();
     int8_t getRssi() const;
     static void onDataRecv(const uint8_t* mac, const uint8_t* data, int len);
 private:

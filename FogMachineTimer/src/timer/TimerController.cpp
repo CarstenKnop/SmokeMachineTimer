@@ -18,21 +18,23 @@ void TimerController::begin(float tonSeconds, float toffSeconds) {
 
 void TimerController::update(unsigned long now) {
     if (outputOverride) {
+        bool prev = outputState;
         outputState = true;
         digitalWrite(pin, HIGH);
+        if (outputState != prev) stateChangedFlag = true;
         return;
     }
     float elapsed = (now - lastSwitch) / 1000.0f;
     currentStateSeconds = elapsed;
     if (outputState) {
         if (elapsed >= ton) {
-            outputState = false;
+            outputState = false; stateChangedFlag = true;
             lastSwitch = now;
             digitalWrite(pin, LOW);
         }
     } else {
         if (elapsed >= toff) {
-            outputState = true;
+            outputState = true; stateChangedFlag = true;
             lastSwitch = now;
             digitalWrite(pin, HIGH);
         }
@@ -45,20 +47,25 @@ void TimerController::setTimes(float tonSeconds, float toffSeconds) {
 }
 
 void TimerController::overrideOutput(bool on) {
+    bool prev = outputState;
     outputOverride = on;
     digitalWrite(pin, on ? HIGH : LOW);
+    outputState = on;
+    if (outputState != prev) stateChangedFlag = true;
 }
 
 void TimerController::resetState() {
+    bool prev = outputState;
     outputState = false;
     lastSwitch = millis();
     digitalWrite(pin, LOW);
+    if (outputState != prev) stateChangedFlag = true;
 }
 
 void TimerController::toggleAndReset() {
     // Invert current state, reset timer baseline, resume normal cycling (no permanent override)
     outputOverride = false; // ensure override not latched
-    outputState = !outputState;
+    outputState = !outputState; stateChangedFlag = true;
     lastSwitch = millis();
     digitalWrite(pin, outputState ? HIGH : LOW);
 }
@@ -77,4 +84,8 @@ float TimerController::getToff() const {
 
 float TimerController::getCurrentStateSeconds() const {
     return currentStateSeconds;
+}
+
+bool TimerController::consumeStateChanged() {
+    bool v = stateChangedFlag; stateChangedFlag = false; return v;
 }

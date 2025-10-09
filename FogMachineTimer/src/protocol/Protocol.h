@@ -18,6 +18,7 @@ struct __attribute__((packed)) ProtocolMsg {
     uint8_t cmd;          // ProtocolCmd
     float ton;            // seconds (ON duration)
     float toff;           // seconds (OFF duration)
+    float elapsed;        // seconds elapsed in current state (for TIME row)
     char name[16];
     bool outputOverride;  // status: current output state / command: desired override
     bool resetState;      // request to reset internal timing cycle

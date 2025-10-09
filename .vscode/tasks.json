@@ -1,0 +1,58 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build FogMachineRemoteControl (PIO)",
+			"type": "shell",
+			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-d",
+				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "Build FogMachineRemoteControl (PIO)",
+			"type": "shell",
+			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-d",
+				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl",
+				"-v"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "Rebuild FogMachineRemoteControl (PIO)",
+			"type": "shell",
+			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-d",
+				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "Build FogMachineRemoteControl (PIO)",
+			"type": "shell",
+			"command": "C:\\Users\\Carsten.Knop\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-d",
+				"z:\\source\\ESP32\\SmokeMachineTimer\\FogMachineRemoteControl"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		}
+	]
+}

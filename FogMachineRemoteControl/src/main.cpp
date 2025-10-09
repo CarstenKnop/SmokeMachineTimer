@@ -57,9 +57,13 @@ void loop() {
   // Interpret inputs in a separate class for SoC/SOLID
   auto ev = inputInterp.update(buttons, menu);
   if (ev.longHash) { menu.enterMenu(); hashLongEntries++; }
-  if (ev.shortHash) { comm.resetActive(); }
+  if (ev.shortHash) {
+    // Enter Edit Timers directly from main screen (original behavior)
+    const SlaveDevice* act = deviceMgr.getActive();
+    if (act) { menu.enterEditTimers(act->ton, act->toff); }
+  }
   if (ev.starPress) { comm.toggleActive(); }
-  menu.update(buttons.upPressed(), buttons.downPressed(), buttons.hashPressed(), buttons.hashLongPressed(), buttons.starPressed());
+  menu.update(buttons.upPressed(), buttons.downPressed(), buttons.hashPressed(), buttons.hashLongPressed(), buttons.starPressed(), buttons.upHeld(), buttons.downHeld());
   // If menu just closed, ensure a new long-press requires a fresh leading edge
   if (prevInMenu && !menu.isInMenu()) {
     inputInterp.resetOnMenuExit(menu.getMenuExitTime());

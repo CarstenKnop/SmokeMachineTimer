@@ -70,9 +70,30 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
         drawMenu(menu, deviceMgr);
     } else {
         // Battery indicator only on non-menu screens
-        uint8_t batt = battery.getPercent();
-        drawBatteryIndicator(batt);
-        drawMainScreen(deviceMgr, battery);
+    uint8_t batt = battery.getPercent();
+    drawBatteryIndicator(batt);
+    drawMainScreen(deviceMgr, battery);
+        // If editing timers mode, draw an overlay similar to original with size-2 digits and labels
+        if (menu.editingTimers()) {
+            display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            auto drawTimerRowEdit = [&](int tenths, int y, const char* label, int startDigit, bool highlight){
+                char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
+                display.setTextSize(2);
+                int startX=26; int digitW=11;
+                int x=startX;
+                for (int i=0;i<5;i++) {
+                    bool inv = highlight && (i+startDigit)==menu.getEditDigitIndex();
+                    if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x,y,digitW,16,SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.fillRect(x,y,digitW,16,SSD1306_BLACK);} display.setCursor(x,y); display.print(buf[i]); if (i==3) { display.print('.'); x+=digitW;} x+=digitW;
+                }
+                int labelX = startX + digitW*(5+1) + 10;
+                display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
+            };
+            // First row: TOFF (digits 0..4)
+            drawTimerRowEdit(menu.getEditToffTenths(), 0, "Toff", 0, true);
+            // Second row: TON (digits 5..9)
+            drawTimerRowEdit(menu.getEditTonTenths(), 24, "Ton", 5, true);
+            display.setTextSize(1); display.setCursor(0,54); display.print("#=Next *=Cancel");
+        }
         // Show progress bar for long-press only after a grace period
     unsigned long holdMs = buttons.hashHoldDuration();
         unsigned long pressStart = buttons.hashPressStartTime();
@@ -114,13 +135,25 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
 }
 
 void DisplayManager::drawBatteryIndicator(uint8_t percent) const {
-    int x = 0, y = 0;
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(x, y);
-    // 1.5 char wide target – show a condensed form like nn%
-    if (percent > 99) percent = 99; // keep width
-    display.printf("%2u%%", percent);
+    int x = Defaults::UI_BATT_X;
+    int y = Defaults::UI_BATT_Y;
+    int w = Defaults::UI_BATT_W;
+    int h = Defaults::UI_BATT_H;
+    int termW = Defaults::UI_BATT_TERM_W;
+    int termH = Defaults::UI_BATT_TERM_H;
+    // Clear area
+    display.fillRect(x, y, w + termW + 1, h, SSD1306_BLACK);
+    // Body
+    display.drawRect(x, y, w, h, SSD1306_WHITE);
+    // Terminal (to the right, vertically centered)
+    display.fillRect(x + w, y + (h - termH)/2, termW, termH, SSD1306_WHITE);
+    // Fill level (1px inset)
+    int innerW = w - 2;
+    int innerH = h - 2;
+    if (percent > 100) percent = 100;
+    int fillW = (innerW * percent) / 100;
+    if (fillW < 0) fillW = 0; if (fillW > innerW) fillW = innerW;
+    if (fillW > 0) display.fillRect(x + 1, y + 1, fillW, innerH, SSD1306_WHITE);
 }
 
 void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const {
@@ -143,6 +176,23 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
         display.setCursor(0, 54);
         int applied = menu.getAppliedBlankingSeconds();
         display.print("Active: "); if (applied==0) display.print("OFF"); else { display.print(applied); display.print("s"); }
+        return;
+    } else if (menu.getMode() == MenuSystem::Mode::EDIT_TIMERS) {
+        // Edit Timers modal: draw same style as main overlay but inside menu path
+        auto drawTimerRowEdit = [&](int tenths, int y, const char* label, int startDigit){
+            char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
+            display.setTextSize(2);
+            int startX = Defaults::UI_TIMER_START_X; int digitW = Defaults::UI_DIGIT_WIDTH; int x=startX;
+            for (int i=0;i<5;i++) {
+                bool inv = ((i+startDigit)==menu.getEditDigitIndex());
+                if (inv) { display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); display.fillRect(x,y,digitW,16,SSD1306_WHITE);} else { display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.fillRect(x,y,digitW,16,SSD1306_BLACK);} display.setCursor(x,y); display.print(buf[i]); if (i==3) { display.print('.'); x+=digitW;} x+=digitW;
+            }
+            int labelX = startX + digitW*(5+1) + Defaults::UI_LABEL_GAP_X;
+            display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
+        };
+        drawTimerRowEdit(menu.getEditToffTenths(), Defaults::UI_TIMER_ROW_Y_OFF, "Toff", 0);
+        drawTimerRowEdit(menu.getEditTonTenths(),  Defaults::UI_TIMER_ROW_Y_ON,  "Ton",  5);
+        display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(0,54); display.print("#=Next *=Cancel");
         return;
     } else if (menu.getMode() == MenuSystem::Mode::PAIRING) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Pair Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
@@ -297,30 +347,62 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
 }
 
 void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const {
-    display.setTextSize(1);
+    display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 12);
+    display.setCursor(0, 0);
     if (deviceMgr.getDeviceCount() == 0) {
-        display.print("No devices paired");
+        display.print("No devices");
         return;
     }
     const SlaveDevice* act = deviceMgr.getActive();
     if (!act) {
-        display.print("No active device");
+        display.print("No active");
         return;
     }
     unsigned long now = millis();
     bool fresh = (act->lastStatusMs != 0) && (now - act->lastStatusMs < 5000UL);
     if (!fresh) {
-        display.print("Waiting for status...\n");
+        display.setTextSize(1);
+        display.setCursor(0, 12);
+        display.print("Waiting for status...");
+        display.setCursor(0, 24);
         display.print(act->name);
         return;
     }
-    display.printf("%s\nTon: %.1fs\nToff: %.1fs\nState: %s", act->name, act->ton, act->toff, act->outputState?"ON":"OFF");
+    // Timers positioned like original using Defaults
+    drawTimerRow((int)(act->toff*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_OFF, "OFF", Defaults::UI_TIMER_START_X);
+    drawTimerRow((int)(act->ton*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_ON,  "ON",  Defaults::UI_TIMER_START_X);
+    // Third line: elapsed time in current state (TIME), smoothed locally until next STATUS
+    {
+        unsigned long nowMs = millis();
+        float since = (act->lastStatusMs > 0) ? ((nowMs - act->lastStatusMs) / 1000.0f) : 0.0f;
+        float e = act->elapsed + since;
+        float cap = act->outputState ? act->ton : act->toff;
+        if (e > cap) e = cap;
+        drawTimerRow((int)(e*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_TIME,  "TIME",  Defaults::UI_TIMER_START_X);
+    }
+    // State indicator: show '*' at bottom-left when ON (matches original feel)
+    display.setTextSize(2); if (act->outputState) { display.setCursor(0, Defaults::UI_STATE_CHAR_Y); display.print('*'); }
+}
+
+void DisplayManager::drawTimerRow(int tenths, int y, const char* label, int startX) const {
+    char buf[8]; int integerPart = tenths/10; int frac = tenths%10; snprintf(buf,sizeof(buf),"%04d%01d", integerPart, frac);
+    display.setTextSize(2);
+    int x = startX; int digitW = Defaults::UI_DIGIT_WIDTH;
+    for (int i=0;i<5;i++) {
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+        display.fillRect(x,y,digitW,16,SSD1306_BLACK);
+        display.setCursor(x,y);
+        display.print(buf[i]);
+        if (i==3) { display.print('.'); x+=digitW; }
+        x += digitW;
+    }
+    int labelX = startX + digitW*(5+1) + Defaults::UI_LABEL_GAP_X;
+    display.setTextSize(1); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.setCursor(labelX,y+7); display.print(label);
 }
 
 void DisplayManager::drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const {
-    const int barX = 0, barY = 48, barW = 128, barH = 16;
+    const int barX = Defaults::UI_PBAR_X, barY = Defaults::UI_PBAR_Y, barW = Defaults::UI_PBAR_W, barH = Defaults::UI_PBAR_H;
     float percent = (float)holdMs / (float)longPressMs;
     if (percent < 0.f) percent = 0.f; if (percent > 1.f) percent = 1.f;
     display.fillRect(barX, barY, barW, barH, SSD1306_BLACK);

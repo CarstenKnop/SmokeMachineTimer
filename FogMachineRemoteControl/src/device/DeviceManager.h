@@ -11,6 +11,7 @@ struct SlaveDevice {
     int8_t rssiSlave = -127;    // RSSI reported by slave (placeholder)
     float ton = 0.f;
     float toff = 0.f;
+    float elapsed = 0.f;        // seconds elapsed in current state (from slave)
     bool outputState = false;
     unsigned long lastStatusMs = 0; // millis() timestamp of last received status
 };

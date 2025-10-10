@@ -11,31 +11,55 @@ void DisplayManager::drawBatteryIndicator(uint8_t percent) const {
     int termW = Defaults::UI_BATT_TERM_W;
     int termH = Defaults::UI_BATT_TERM_H;
     display.fillRect(x, y, w + termW + 1, h, SSD1306_BLACK);
-    display.drawRect(x, y, w, h, SSD1306_WHITE);
-    display.fillRect(x + w, y + (h - termH)/2, termW, termH, SSD1306_WHITE);
     int innerW = w - 2;
     int innerH = h - 2;
     if (percent > 100) percent = 100;
+    if (percent < 0) percent = 0;
+    bool charging=false, powered=false;
+    if (CHARGER_CHG_PIN >= 0) {
+        int lvl = digitalRead(CHARGER_CHG_PIN);
+        charging = Defaults::CHARGER_CHG_ACTIVE_HIGH ? (lvl == HIGH) : (lvl == LOW);
+    }
+    if (CHARGER_PWR_PIN >= 0) {
+        int lvl = digitalRead(CHARGER_PWR_PIN);
+        powered = Defaults::CHARGER_PWR_ACTIVE_HIGH ? (lvl == HIGH) : (lvl == LOW);
+    }
+
+    // Default percent fill
     int fillW = (innerW * percent) / 100;
     if (fillW < 0) fillW = 0; if (fillW > innerW) fillW = innerW;
-    if (fillW > 0) display.fillRect(x + 1, y + 1, fillW, innerH, SSD1306_WHITE);
-    bool charging=false, plugged=false;
-    if (CHARGER_CHG_PIN >= 0) charging = (digitalRead(CHARGER_CHG_PIN) == HIGH);
-    if (CHARGER_PWR_PIN >= 0) plugged  = (digitalRead(CHARGER_PWR_PIN) == HIGH);
-    if (charging) {
-        int bx = x + w/2 - 2;
-        int by = y + 1;
-        display.drawLine(bx+1, by+0, bx+3, by+3, SSD1306_BLACK);
-        display.drawLine(bx+3, by+3, bx+2, by+3, SSD1306_BLACK);
-        display.drawLine(bx+2, by+3, bx+4, by+6, SSD1306_BLACK);
-        display.drawLine(bx+0, by+3, bx+2, by+3, SSD1306_BLACK);
-        display.drawLine(bx+2, by+3, bx+0, by+6, SSD1306_BLACK);
-    } else if (plugged) {
-        int px = x + w/2 - 3;
-        int py = y + 2;
-        display.fillRect(px, py, 5, 3, SSD1306_BLACK);
-        display.drawPixel(px+1, py-1, SSD1306_BLACK);
-        display.drawPixel(px+3, py-1, SSD1306_BLACK);
-        display.drawLine(px+4, py+1, px+6, py+1, SSD1306_BLACK);
+
+    if (powered && !charging) {
+        // Replace battery icon with a compact USB/plug glyph to avoid TIME overlap
+        // Shift left slightly so it doesn't collide with TIME digits
+        int px = x + 1;
+        int py = y + 1;
+        display.fillRect(x, y, w + termW + 1, h, SSD1306_BLACK);
+        // Draw a simple plug: two prongs and a body
+        // Body
+        display.drawRect(px+2, py+1, 9, h-2, SSD1306_WHITE);
+        // Cable
+        display.drawLine(px, py+3, px+2, py+3, SSD1306_WHITE);
+        display.drawLine(px+11, py+3, px+14, py+3, SSD1306_WHITE);
+        // Prongs
+        display.drawLine(px+4, py,   px+4, py+1, SSD1306_WHITE);
+        display.drawLine(px+8, py,   px+8, py+1, SSD1306_WHITE);
+    } else {
+        // Draw classic battery outline
+        display.drawRect(x, y, w, h, SSD1306_WHITE);
+        display.fillRect(x + w, y + (h - termH)/2, termW, termH, SSD1306_WHITE);
+        if (charging) {
+            // Blink the entire battery fill to indicate charging (ignore percent)
+            bool blinkOn = ((millis() / 350) % 2) == 0;
+            if (blinkOn) {
+                display.fillRect(x + 1, y + 1, innerW, innerH, SSD1306_WHITE);
+            } else {
+                // empty interior during blink-off
+                display.fillRect(x + 1, y + 1, innerW, innerH, SSD1306_BLACK);
+            }
+        } else {
+            // Normal: draw percent fill
+            if (fillW > 0) display.fillRect(x + 1, y + 1, fillW, innerH, SSD1306_WHITE);
+        }
     }
 }

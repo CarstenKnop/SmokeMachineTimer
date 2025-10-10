@@ -37,23 +37,24 @@ InputInterpreter inputInterp;
 RemoteConfig rconfig;
 
 void setup() {
+  // Ensure RTC IO holds are released on boot so pins can be configured normally
+  gpio_deep_sleep_hold_dis();
   Serial.begin(115200);
   pinMode(COMM_OUT_GPIO, OUTPUT);
   digitalWrite(COMM_OUT_GPIO, LOW);
-  // Initialize display first and draw splash so we can show boot progress
-  displayMgr.begin(); // handles Wire + splash internally
+  // Start normally (no special wake flag or splash skipping)
+  esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
+  bool wokeFromDeepSleep = (wake == ESP_SLEEP_WAKEUP_EXT0 || wake == ESP_SLEEP_WAKEUP_EXT1 || wake == ESP_SLEEP_WAKEUP_TIMER || wake == ESP_SLEEP_WAKEUP_GPIO);
+  // Initialize display and show boot progress
+  displayMgr.begin(); // handles Wire + splash internally (may be skipped)
   displayMgr.drawBootStatus("Boot: display OK");
   buttons.begin();
   displayMgr.drawBootStatus("Boot: buttons OK");
-  // Detect deep sleep wake and optionally skip splash on resume
-  esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
-  bool wokeFromDeepSleep = (wake == ESP_SLEEP_WAKEUP_EXT0 || wake == ESP_SLEEP_WAKEUP_EXT1 || wake == ESP_SLEEP_WAKEUP_TIMER || wake == ESP_SLEEP_WAKEUP_GPIO);
-  if (wokeFromDeepSleep) {
-    displayMgr.setSkipSplash(true);
-    displayMgr.drawBootStatus("Boot: woke from deep sleep");
-  } else {
-    displayMgr.drawBootStatus("Boot: cold start");
-  }
+  // Configure charger status pins with sensible pulls
+  if (CHARGER_CHG_PIN >= 0) { pinMode(CHARGER_CHG_PIN, Defaults::CHARGER_CHG_ACTIVE_HIGH ? INPUT_PULLDOWN : INPUT_PULLUP); }
+  if (CHARGER_PWR_PIN >= 0) { pinMode(CHARGER_PWR_PIN, Defaults::CHARGER_PWR_ACTIVE_HIGH ? INPUT : INPUT_PULLUP); }
+  // Inform user if we woke from deep sleep
+  displayMgr.drawBootStatus(wokeFromDeepSleep ? "Boot: woke from deep sleep" : "Boot: cold start");
   // Boot-time failsafe: hold UP to enter update window; show a 2s prompt before proceeding
   {
     // Debounce/settle a few cycles
@@ -94,14 +95,23 @@ void setup() {
   displayMgr.drawBootStatus("Boot: battery OK");
   comm.begin();
   displayMgr.drawBootStatus("Boot: comm OK");
+  // Kick an initial status request so main screen (RSSI/bars) populates quickly after boot
+  comm.requestStatusActive();
 
-  // Apply stored TX power and OLED brightness
+  // Apply stored TX power, OLED brightness, and display blanking
   menu.setAppliedTxPowerQdbm(rconfig.getTxPowerQdbm());
   {
     uint8_t lvl = rconfig.getOledBrightness();
     if (lvl < 5) lvl = 5;
     menu.setAppliedOledBrightness(lvl);
   }
+  // Blanking seconds persisted
+  menu.setAppliedBlankingSeconds(rconfig.getBlankingSeconds());
+  // RSSI calibration bounds
+  menu.editRssiLowDbm = rconfig.getRssiLowDbm();
+  menu.editRssiHighDbm = rconfig.getRssiHighDbm();
+  menu.setAppliedRssiLowDbm(menu.editRssiLowDbm);
+  menu.setAppliedRssiHighDbm(menu.editRssiHighDbm);
   esp_wifi_set_max_tx_power(rconfig.getTxPowerQdbm());
   // Apply display contrast when display is ready
   // Note: Adafruit_SSD1306 uses setContrast(0..255) and dim(). We'll adjust in render using menu applied value.
@@ -180,6 +190,8 @@ void loop() {
   // If menu just closed, ensure a new long-press requires a fresh leading edge
   if (prevInMenu && !menu.isInMenu()) {
     inputInterp.resetOnMenuExit(menu.getMenuExitTime());
+    // Immediately request a fresh status for the active device to update RSSI bars promptly
+    comm.requestStatusActive();
   }
 
   // Handle active device selection commit
@@ -200,7 +212,13 @@ void loop() {
     unsigned long nowMs = millis();
     static unsigned long fastPollUntil = 0;
     if (prevInMenu && !menu.isInMenu()) { fastPollUntil = millis() + 2000; }
-    unsigned long interval = (millis() < fastPollUntil) ? 120 : 300; // faster
+    // Adapt polling rate: faster when stale, moderately fast otherwise; min with fast-poll window
+    bool staleRssi = true;
+    if (const SlaveDevice* act = deviceMgr.getActive()) {
+      staleRssi = (act->lastStatusMs == 0) || (nowMs - act->lastStatusMs > Defaults::RSSI_STALE_MS);
+    }
+    unsigned long baseInterval = staleRssi ? 140UL : 220UL; // ~7 Hz when stale, ~4.5 Hz when fresh
+    unsigned long interval = (millis() < fastPollUntil) ? min<unsigned long>(120UL, baseInterval) : baseInterval;
     if (nowMs - lastStatusReq > interval) {
       comm.requestStatusActive();
       lastStatusReq = nowMs;
@@ -229,6 +247,16 @@ void loop() {
   } else {
     // Turn off sniffer when leaving RSSI screen
     comm.setRssiSnifferEnabled(false);
+  }
+
+  // While calibrating RSSI thresholds, keep polling the active device for Timer-side RSSI updates
+  static unsigned long lastRssiCalibPollMs = 0;
+  if (menu.getMode() == MenuSystem::Mode::EDIT_RSSI_CALIB && !displayMgr.isBlank()) {
+    unsigned long nowMs = millis();
+    if (nowMs - lastRssiCalibPollMs > 500) { // 2 Hz to feel live
+      comm.requestStatusActive();
+      lastRssiCalibPollMs = nowMs;
+    }
   }
 
   // Pairing: keep scanning continuously while on screen, but pause when display is blank
@@ -267,9 +295,7 @@ void loop() {
     }
   }
 
-  // Handle remote factory reset request (from menu)
-  if (menu.consumeRemoteReset()) {
-  // Handle menu saves for TX power and brightness
+  // Handle menu saves (persist settings)
   int8_t qdbm;
   if (menu.consumeTxPowerSave(qdbm)) {
     rconfig.setTxPowerQdbm(qdbm);
@@ -281,11 +307,31 @@ void loop() {
     if (lvl < 5) lvl = 5;
     rconfig.setOledBrightness(lvl);
     rconfig.save();
-    // No direct global setter here; DisplayManager can read applied value via menu or we apply via a small hook
   }
+  int secs;
+  if (menu.consumeBlankingSave(secs)) {
+    rconfig.setBlankingSeconds((uint16_t)max(0, secs));
+    rconfig.save();
+  }
+  int8_t loDbm, hiDbm;
+  if (menu.consumeRssiCalibSave(loDbm, hiDbm)) {
+    rconfig.setRssiLowDbm(loDbm);
+    rconfig.setRssiHighDbm(hiDbm);
+    rconfig.save();
+  }
+
+  // Handle remote factory reset request (from menu)
+  if (menu.consumeRemoteReset()) {
     Serial.println("[REMOTE] Factory reset: clearing paired devices and calibration, restarting...");
     deviceMgr.factoryReset();
     calibMgr.resetToDefaults();
+    delay(200);
+    ESP.restart();
+  }
+
+  // Handle power cycle request (from menu)
+  if (menu.consumePowerCycle()) {
+    Serial.println("[REMOTE] Power cycle requested via menu. Restarting...");
     delay(200);
     ESP.restart();
   }
@@ -319,8 +365,17 @@ void loop() {
 // all buttons in the mask to wake on any button.
 static void maybeEnterDeepSleep(const DisplayManager& disp) {
   if (!disp.isBlank()) return;
-  // Wake on any button press (active-low buttons): UP, DOWN, #, *
-  const uint64_t wake_mask = (1ULL<<BUTTON_UP_GPIO) | (1ULL<<BUTTON_DOWN_GPIO) | (1ULL<<BUTTON_HASH_GPIO) | (1ULL<<BUTTON_STAR_GPIO);
+  // Per Seeed XIAO ESP32C3 docs, only D0~D3 support deep-sleep GPIO wake.
+  // Our buttons use D1 (UP=GPIO3) and D2 (DOWN=GPIO4). Restrict wake to these pins for reliable wake.
+  const uint64_t wake_mask = (1ULL<<BUTTON_UP_GPIO) | (1ULL<<BUTTON_DOWN_GPIO);
+  // Configure wake-up GPIOs and set pull-ups for active-low buttons during deep sleep
+  gpio_wakeup_enable((gpio_num_t)BUTTON_UP_GPIO,   GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON_DOWN_GPIO, GPIO_INTR_LOW_LEVEL);
+  // Enable internal pull-ups to keep lines high while sleeping (avoid floating)
+  gpio_pullup_en((gpio_num_t)BUTTON_UP_GPIO);
+  gpio_pullup_en((gpio_num_t)BUTTON_DOWN_GPIO);
+  // Hold configuration during deep sleep so pulls remain active
+  gpio_deep_sleep_hold_en();
   esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 }

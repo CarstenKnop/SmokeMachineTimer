@@ -8,7 +8,7 @@ class BatteryMonitor {
 public:
     BatteryMonitor(uint8_t adcPin, CalibrationManager& calibMgr);
     void begin();
-    uint16_t readRawAdc();
+    uint16_t readRawAdc() const;
     uint8_t getPercent() const;
     float getVoltage();
 private:

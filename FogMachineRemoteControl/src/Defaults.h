@@ -88,6 +88,12 @@ namespace Defaults {
   static constexpr int UI_PBAR_W          = 128;
   static constexpr int UI_PBAR_H          = 16;
 
+  // Charger status pin polarity
+  // Many charger ICs expose CHG (charging) as active-LOW and PWR (power good) as active-HIGH.
+  // Adjust here if your hardware differs.
+  static constexpr bool CHARGER_CHG_ACTIVE_HIGH = true;  // true  => HIGH means charging (set per hardware)
+  static constexpr bool CHARGER_PWR_ACTIVE_HIGH = true;  // true  => HIGH means powered
+
 
   // Version tag (may be overridden later per project release scheme)
   inline const char* VERSION() { return "FogMachineTimer v1.0"; }

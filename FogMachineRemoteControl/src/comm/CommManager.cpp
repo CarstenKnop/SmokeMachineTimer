@@ -215,11 +215,14 @@ void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     dev.elapsed = msg.elapsed;
     // Update RSSI estimates: remote side (placeholder) and timer-provided RSSI
     dev.rssiRemote = rssi; // TODO: replace with real RX RSSI if available
-    // RSSI robustness: treat -127 as invalid; keep last-good for a grace window handled by UI; still store value
-            // Update timer-side RSSI only if valid (avoid overwriting with -127 blips)
-            if (msg.rssiAtTimer > -120) {
-                dev.rssiSlave = msg.rssiAtTimer; // value measured at timer
-            }
+    // Normalize timer-side RSSI:
+    // - Some firmwares report magnitude as positive (e.g., 40 for -40 dBm). Interpret >0 as negative.
+    // - Treat 0 and <= -120 as invalid/sentinel.
+    int8_t rssiTimer = msg.rssiAtTimer;
+    if (rssiTimer > 0) rssiTimer = (int8_t)(-rssiTimer);
+    if (rssiTimer < 0 && rssiTimer > -120) {
+        dev.rssiSlave = rssiTimer; // value measured at timer (normalized)
+    }
     // Reflect name
     if (msg.name[0]) { strncpy(dev.name, msg.name, sizeof(dev.name)-1); dev.name[sizeof(dev.name)-1] = '\0'; }
         dev.lastStatusMs = millis();

@@ -9,7 +9,7 @@ void BatteryMonitor::begin() {
     pinMode(pin, INPUT);
 }
 
-uint16_t BatteryMonitor::readRawAdc() {
+uint16_t BatteryMonitor::readRawAdc() const {
     return analogRead(pin);
 }
 

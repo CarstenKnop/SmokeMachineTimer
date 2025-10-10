@@ -19,13 +19,13 @@ void DisplayManager::drawUpdateCountdown(uint8_t secondsRemaining) const {
     {
         char buf[8]; snprintf(buf, sizeof(buf), "%us", (unsigned)secondsRemaining);
         int len = strlen(buf);
-        int size = 3;
+    int size = 3;
         display.setTextSize(size);
         int charW = 6 * size; int charH = 8 * size;
         int textW = len * charW;
         int x = (128 - textW) / 2; if (x < 0) x = 0;
-        // Vertically center and nudge +2px down
-        int y = ((64 - charH) / 2) + 2; if (y < 10) y = 10;
+    // Vertically center and nudge +7px down (2px further down from the prior +5px state)
+    int y = ((64 - charH) / 2) + 7; if (y < 10) y = 10;
         display.fillRect(0, y-2, 128, charH+4, SSD1306_BLACK);
         display.setCursor(x, y);
         display.print(buf);

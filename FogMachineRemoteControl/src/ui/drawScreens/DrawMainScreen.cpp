@@ -4,9 +4,10 @@
 #include "device/DeviceManager.h"
 #include "battery/BatteryMonitor.h"
 #include "ui/DisplayManager.h"
+#include "menu/MenuSystem.h"
 #include <cstdio>
 
-void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const {
+void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu) const {
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
     if (deviceMgr.getDeviceCount() == 0) {
@@ -22,18 +23,37 @@ void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const Batter
         display.print("No active");
         return;
     }
+    unsigned long now = millis();
+    bool fresh = (act->lastStatusMs != 0) && (now - act->lastStatusMs < Defaults::RSSI_STALE_MS);
     {
+        if (!fresh) {
+            display.setTextSize(1);
+            display.setCursor(64, 0);
+            display.print("Stale");
+            display.setTextSize(2);
+        }
         auto drawRssiBars = [&](int8_t rssi, int x, int y){
+            // Treat invalid/default readings (>=0) and very low sentinel (<=-120) as 0 levels
+            int8_t v = rssi;
+            if (v >= 0 || v <= -120) v = -127;
+            // Map calibrated range [low..high] (negative dBm) to [0..6] bars, with clamping
+            int8_t low = menu.getAppliedRssiLowDbm();
+            int8_t high = menu.getAppliedRssiHighDbm();
+            if (high <= low) { high = (int8_t)(low + 5); }
+            if (v <= low) {
+                v = low;
+            } else if (v >= high) {
+                v = high;
+            }
             int level = 0;
-            if      (rssi > -45) level = 6;
-            else if (rssi > -55) level = 5;
-            else if (rssi > -65) level = 4;
-            else if (rssi > -75) level = 3;
-            else if (rssi > -85) level = 2;
-            else if (rssi > -95) level = 1;
-            else level = 0;
+            if (high > low) {
+                float frac = (float)(v - low) / (float)(high - low); // 0..1
+                int mapped = (int)(frac * 6.0f + 0.5f);
+                if (mapped < 0) mapped = 0; if (mapped > 6) mapped = 6;
+                level = mapped;
+            }
             const int bars = 6;
-            const int barW = 2; const int gap = 1; const int areaH = 12;
+            const int barW = 3; const int gap = 1; const int areaH = 12; // width=3 makes hollow (outlined) bars visibly different
             for (int i=0;i<bars;i++) {
                 int h = 2 + i*2;
                 int bx = x + i*(barW+gap);
@@ -49,15 +69,8 @@ void DisplayManager::drawMainScreen(const DeviceManager& deviceMgr, const Batter
             }
         };
         int rssiY = Defaults::UI_BATT_Y + Defaults::UI_BATT_H + 4;
+        // Use Timer-side RSSI value but keep the existing RSSI icon and placement
         drawRssiBars(act->rssiSlave, 0, rssiY);
-    }
-    unsigned long now = millis();
-    bool fresh = (act->lastStatusMs != 0) && (now - act->lastStatusMs < 5000UL);
-    if (!fresh) {
-        display.setTextSize(1);
-        display.setCursor(0, 36);
-        display.print("Timer disconnected...");
-        return;
     }
     drawTimerRow((int)(act->toff*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_OFF, "OFF", Defaults::UI_TIMER_START_X);
     drawTimerRow((int)(act->ton*10.0f + 0.5f), Defaults::UI_TIMER_ROW_Y_ON,  "ON",  Defaults::UI_TIMER_START_X);

@@ -5,12 +5,12 @@
 #include <cstring>
 #include <cstdio>
 
-void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const {
+void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr, const BatteryMonitor& battery) const {
     display.setTextSize(1);
     if (menu.isEditingBlanking()) {
         display.setCursor(0, 0);
         display.setTextColor(SSD1306_WHITE);
-        display.println("Display Blanking");
+        display.println("Auto Off");
         display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
         int val = menu.getEditingBlankingSeconds();
         display.setCursor(0, 16);
@@ -169,10 +169,126 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Confirm"); display.drawLine(0,9,127,9,SSD1306_WHITE);
         const char* what = "";
         auto act = menu.getConfirmAction();
-        if (act == MenuSystem::ConfirmAction::RESET_SLAVE) what = "Reset Timer?";
-        else if (act == MenuSystem::ConfirmAction::RESET_REMOTE) what = "Reset Remote?";
+    if (act == MenuSystem::ConfirmAction::RESET_SLAVE) what = "Reset Timer?";
+    else if (act == MenuSystem::ConfirmAction::RESET_REMOTE) what = "Reset Remote?";
+    else if (act == MenuSystem::ConfirmAction::POWER_CYCLE) what = "Power Cycle Remote?";
         display.setCursor(0,24); display.println(what);
         display.setCursor(0,54); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.println("#=Yes *=No");
+        return;
+    } else if (menu.getMode() == MenuSystem::Mode::SHOW_RSSI) {
+        // RSSI screen: list paired devices with Remote (R) and Timer (T) RSSI columns
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0,0); display.print("RSSI");
+        // Right-align units "dBm" at the top-right
+        const char* units = "dBm"; int unitsW = 3*6; int unitsX = 127 - unitsW + 1; if (unitsX < 0) unitsX = 0;
+        display.setCursor(unitsX, 0); display.print(units);
+        display.drawLine(0,9,127,9,SSD1306_WHITE);
+        // Header row aligned with data columns: Name, R (Remote), T (Timer)
+        display.setTextSize(1);
+        const int colNameX = 2;
+        const int colRRightX = 96;   // right edge for R column
+        const int colTRightX = 126;  // right edge for T column
+        display.setCursor(colNameX, 10); display.print("Name");
+        // Place single-letter headers above right-aligned numeric columns
+        display.setCursor(colRRightX - 6, 10); display.print('R');
+        display.setCursor(colTRightX - 6, 10); display.print('T');
+        int count = 0; int activeIdx = -1; if (auto *cm=CommManager::get()) { count = cm->getPairedCount(); if (cm->getActiveDevice()) activeIdx = cm->getActiveDevice() - &cm->getPaired(0); }
+        int first = menu.getRssiFirst(); if (first < 0) first = 0; if (first > count-1) first = count>0?count-1:0;
+        int maxRows = 4; // rows under header
+        for (int i=0;i<maxRows;i++) {
+            int idx = first + i; if (idx >= count) break;
+            const auto &d = CommManager::get()->getPaired(idx);
+            int y = 20 + i*11;
+            // Left: active marker and name (clipped length to keep columns clear)
+            char name[10]; strncpy(name, d.name[0]?d.name:"(noname)", sizeof(name)-1); name[sizeof(name)-1]=0;
+            display.setCursor(colNameX, y);
+            display.print((idx==activeIdx)?'*':' ');
+            display.print(name);
+            // Right: Remote (R) and Timer (T) RSSI values, right-aligned under headers
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d", (int)d.rssiRemote);
+            int w = (int)strlen(buf) * 6; display.setCursor(colRRightX - w, y); display.print(buf);
+            // Timer RSSI with stale guard
+            bool stale = (millis() - d.lastStatusMs) > Defaults::RSSI_STALE_MS;
+            if (d.rssiSlave <= -120 || stale) { strcpy(buf, "N/A"); }
+            else { snprintf(buf, sizeof(buf), "%d", (int)d.rssiSlave); }
+            w = (int)strlen(buf) * 6; display.setCursor(colTRightX - w, y); display.print(buf);
+        }
+        display.setCursor(0,57); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); display.print("Up/Down scroll  *=Back  #=Refresh");
+        return;
+    } else if (menu.getMode() == MenuSystem::Mode::BATTERY_CALIB) {
+        // Battery calibration UI with inverted highlight on the active field and live ADC display
+        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Battery Cal"); display.drawLine(0,9,127,9,SSD1306_WHITE);
+        if (!menu.batteryCalActive()) {
+            display.setCursor(0,14); display.println("Press # to start");
+            display.setCursor(0,26); display.println("*=Cancel");
+            // Live ADC preview even before starting (optional)
+            uint16_t live = battery.readRawAdc();
+            display.setCursor(0,40); display.print("ADC:"); display.print(live);
+            return;
+        } else {
+            // Draw three editable calibration points with inverted highlight on current index, two per line with two spaces between
+            int idx = menu.getEditCalibIndex();
+            auto drawField = [&](const char* label, uint16_t val, int fieldIndex, int x, int y){
+                bool inv = (idx == fieldIndex);
+                const int w = 54; const int h = 10; // wider to cover label+value
+                if (inv) { display.fillRect(x-2, y-1, w, h, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); }
+                else     { display.fillRect(x-2, y-1, w, h, SSD1306_BLACK); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); }
+                display.setCursor(x, y);
+                display.print(label); display.print(':'); display.print(val);
+            };
+            // First row: A0  (two spaces)  A50
+            int y1 = 14;
+            drawField("A0",   menu.getEditCalib(0), 0, 0,   y1);
+            // two spaces gap between fields by cursor positioning via x
+            drawField("A50",  menu.getEditCalib(1), 1, 64,  y1);
+            // Second row: A100  (two spaces)  ADC(live)
+            int y2 = 26;
+            drawField("A100", menu.getEditCalib(2), 2, 0,   y2);
+            // Live raw ADC (non-editable)
+            uint16_t live = battery.readRawAdc();
+            display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            display.setCursor(64, y2);
+            display.print("ADC:"); display.print(live);
+            // Instructions
+            display.setCursor(0, 40);
+            display.println("Up/Down chg  #=Next/Save  *=Cancel");
+            return;
+        }
+    } else if (menu.getMode() == MenuSystem::Mode::EDIT_RSSI_CALIB) {
+        // RSSI Calibration: Low/High thresholds with live preview
+        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("RSSI Cal"); display.drawLine(0,9,127,9,SSD1306_WHITE);
+        int idx = 0; // 0=Low, 1=High
+        // We need access to menu's edit values; draw two fields per row
+        auto drawR=[&](const char* label, int8_t val, int fieldIndex, int x, int y){
+            bool inv = (menu.rssiEditIndex == fieldIndex);
+            const int w = 58; const int h = 10;
+            if (inv) { display.fillRect(x-2, y-1, w, h, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); }
+            else     { display.fillRect(x-2, y-1, w, h, SSD1306_BLACK); display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); }
+            display.setCursor(x, y);
+            display.print(label); display.print(':'); display.print((int) (fieldIndex==0 ? menu.editRssiLowDbm : menu.editRssiHighDbm)); display.print(" dBm");
+        };
+        int y1=14, y2=26;
+        drawR("Low",  menu.editRssiLowDbm,  0, 0,  y1);
+        drawR("High", menu.editRssiHighDbm, 1, 64, y1);
+        // Live RSSI preview from the active device (Timer side) with stale guard
+        char liveBuf[8] = {0};
+        if (auto *cm=CommManager::get()) {
+            if (const SlaveDevice* act = cm->getActiveDevice()) {
+                bool stale = (millis() - act->lastStatusMs) > Defaults::RSSI_STALE_MS;
+                if (act->rssiSlave <= -120 || stale) { strcpy(liveBuf, "N/A"); }
+                else { snprintf(liveBuf, sizeof(liveBuf), "%d", (int)act->rssiSlave); }
+            } else {
+                strcpy(liveBuf, "N/A");
+            }
+        } else {
+            strcpy(liveBuf, "N/A");
+        }
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+        display.setCursor(0, y2);
+        display.print("Live:"); display.print(liveBuf); display.print(" dBm");
+        display.setCursor(0, 40);
+        display.println("Up/Down chg  #=Next/Save  *=Cancel");
         return;
     } else {
         int start = menu.getVisibleStart();

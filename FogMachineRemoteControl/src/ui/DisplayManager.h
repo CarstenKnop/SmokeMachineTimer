@@ -33,8 +33,8 @@ private:
     void splash();
     void drawErrorScreen() const;
     void drawBatteryIndicator(uint8_t percent) const;
-    void drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr) const;
-    void drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery) const;
+    void drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr, const BatteryMonitor& battery) const;
+    void drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu) const;
     void drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const;
     void drawTimerRow(int tenths, int y, const char* label, int startX = 10) const;
 };

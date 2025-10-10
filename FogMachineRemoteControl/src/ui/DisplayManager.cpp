@@ -70,7 +70,7 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
 		lastWakeMs = millis();
 		if (isBlanked) { isBlanked = false; display.ssd1306_command(SSD1306_DISPLAYON); }
 	}
-	// Handle auto-blanking based on applied seconds
+	// Handle Auto Off based on applied seconds
 	int blankSecs = menu.getAppliedBlankingSeconds();
 	if (blankSecs > 0) {
 		unsigned long now = millis();
@@ -90,14 +90,14 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
 	// Draw frame
 	unsigned long tStart = millis();
 	display.clearDisplay();
-	// Battery indicator (top-left)
-	drawBatteryIndicator(battery.getPercent());
 
 	// Route to menu or main
 	if (menu.isInMenu() || menu.getMode() != MenuSystem::Mode::ROOT) {
-		drawMenu(menu, deviceMgr);
+		drawMenu(menu, deviceMgr, battery);
 	} else {
-		drawMainScreen(deviceMgr, battery);
+		// Battery indicator (top-left) only on main screen
+	drawBatteryIndicator(battery.getPercent());
+	drawMainScreen(deviceMgr, battery, menu);
 		// Show hold progress bar for '#' (menu entry visual)
 		unsigned long hold = buttons.hashHoldDuration();
 		if (hold >= Defaults::MENU_PROGRESS_START_MS) {

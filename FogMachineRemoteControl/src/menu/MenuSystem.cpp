@@ -16,13 +16,15 @@ MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), sc
         {"Rename Device"},
         {"Active Timer"},
         {"Edit Timers"},
-        {"WiFi TX Power"},
         {"OLED Brightness"},
+        {"WiFi TX Power"},
         {"Show RSSI"},
+        {"RSSI Calibration"},
         {"Battery Calibration"},
         {"Reset Timer"},
         {"Reset Remote"},
-        {"Display Blanking"}
+        {"Auto Off"},
+        {"Reset"}
     };
 }
 
@@ -56,7 +58,7 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             lastActionLabel = items[selectedIndex].label;
             // Determine action
             const char* label = items[selectedIndex].label;
-            if (strcmp(label, "Display Blanking") == 0) {
+            if (strcmp(label, "Auto Off") == 0) {
                 startBlankingEdit();
             } else if (strcmp(label, "Pair Timer") == 0) {
                 enterPairing();
@@ -77,6 +79,8 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 enterTxPower();
             } else if (strcmp(label, "OLED Brightness") == 0) {
                 enterBrightness();
+            } else if (strcmp(label, "RSSI Calibration") == 0) {
+                enterRssiCalib();
             } else if (strcmp(label, "Show RSSI") == 0) {
                 enterShowRssi();
             } else if (strcmp(label, "Battery Calibration") == 0) {
@@ -85,6 +89,8 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 enterConfirm(ConfirmAction::RESET_SLAVE);
             } else if (strcmp(label, "Reset Remote") == 0) {
                 enterConfirm(ConfirmAction::RESET_REMOTE);
+            } else if (strcmp(label, "Reset") == 0) {
+                enterConfirm(ConfirmAction::POWER_CYCLE);
             } else {
                 // unknown item -> stay
             }
@@ -93,7 +99,7 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
     if (starPressed) { exitMenu(); return; }
     // Long hash does not exit while inside menu; star is used for back
     } else if (mode == Mode::EDIT_BLANKING) {
-        // EDITING DISPLAY BLANKING
+        // EDITING AUTO OFF
         if (upPressed) {
             if (blankingIndex < BLANKING_OPTION_COUNT - 1) blankingIndex++;
         }
@@ -269,23 +275,72 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
         }
         if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::BATTERY_CALIB) {
-        // Initialize lazily when entering (main will seed values)
-        // Up/Down adjust current calibration point
+        // Battery Calibration keys with hold-to-repeat:
+        // - Before start: '#' begins editing, '*' cancels/back
+        // - During edit: Up/Down adjust current point (with repeat); '#' advances and saves at the end; '*' cancels without saving
         if (!calibInProgress) {
-            // First '#' starts the calibration editing session
-            if (hashPressed) { calibInProgress = true; return; }
+            if (hashPressed) { calibInProgress = true; editCalibIndex = 0; return; }
             if (starPressed) { mode = Mode::ROOT; return; }
             // Ignore other keys until started
         } else {
-            if (upPressed) { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); }
-            if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); }
-            // '*' cycles index 0->1->2
-            if (starPressed) { editCalibIndex = (editCalibIndex + 1) % 3; }
-            // '#' saves
-            if (hashPressed) { calibSavePending = true; }
+            // Edge increments
+            if (upPressed)   { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); calibHoldStartUp = now; calibLastRepeatMs = 0; }
+            if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); calibHoldStartDown = now; calibLastRepeatMs = 0; }
+            // Hold-to-repeat
+            bool anyHeld = false;
+            if (upHeld)   { anyHeld = true; if (calibHoldStartUp==0) calibHoldStartUp = now; }
+            else calibHoldStartUp = 0;
+            if (downHeld) { anyHeld = true; if (calibHoldStartDown==0) calibHoldStartDown = now; }
+            else calibHoldStartDown = 0;
+            if (anyHeld) {
+                unsigned long start = calibHoldStartUp ? calibHoldStartUp : calibHoldStartDown;
+                if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
+                    if (calibLastRepeatMs==0 || (now - calibLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
+                        if (upHeld)   editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5);
+                        if (downHeld) editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5);
+                        calibLastRepeatMs = now;
+                        return;
+                    }
+                }
+            } else {
+                calibLastRepeatMs = 0;
+            }
+            if (hashPressed) {
+                if (editCalibIndex < 2) { editCalibIndex++; }
+                else { calibSavePending = true; mode = Mode::ROOT; calibInProgress = false; return; }
+            }
+            if (starPressed) { mode = Mode::ROOT; calibInProgress = false; return; }
         }
-        // Long-press hash can exit
-        if (hashLongPressed && !hashPressed) { mode = Mode::ROOT; return; }
+    } else if (mode == Mode::EDIT_RSSI_CALIB) {
+        // Edit Low (0 bars) and High (6 bars) thresholds in dBm with hold-to-repeat
+        auto clamp=[&](){
+            if (editRssiHighDbm < editRssiLowDbm + 5) editRssiHighDbm = (int8_t)(editRssiLowDbm + 5);
+            if (editRssiHighDbm > 0) editRssiHighDbm = 0;
+            if (editRssiLowDbm < -120) editRssiLowDbm = -120;
+        };
+        if (upPressed)   { if (rssiEditIndex==0) editRssiLowDbm++; else editRssiHighDbm++; rssiHoldStartUp = now; rssiLastRepeatMs=0; clamp(); return; }
+        if (downPressed) { if (rssiEditIndex==0) editRssiLowDbm--; else editRssiHighDbm--; rssiHoldStartDown = now; rssiLastRepeatMs=0; clamp(); return; }
+        bool anyHeld=false;
+        if (upHeld)   { anyHeld=true; if (!rssiHoldStartUp) rssiHoldStartUp=now; } else rssiHoldStartUp=0;
+        if (downHeld) { anyHeld=true; if (!rssiHoldStartDown) rssiHoldStartDown=now; } else rssiHoldStartDown=0;
+        if (anyHeld) {
+            unsigned long start = rssiHoldStartUp ? rssiHoldStartUp : rssiHoldStartDown;
+            if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
+                if (rssiLastRepeatMs==0 || (now - rssiLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
+                    if (upHeld)   { if (rssiEditIndex==0) editRssiLowDbm++; else editRssiHighDbm++; }
+                    if (downHeld) { if (rssiEditIndex==0) editRssiLowDbm--; else editRssiHighDbm--; }
+                    rssiLastRepeatMs = now; clamp(); return;
+                }
+            }
+        } else {
+            rssiLastRepeatMs = 0;
+        }
+        if (hashPressed) {
+            if (rssiEditIndex == 0) { rssiEditIndex = 1; }
+            else { appliedRssiLowDbm = editRssiLowDbm; appliedRssiHighDbm = editRssiHighDbm; rssiSavePending = true; mode = Mode::ROOT; return; }
+            return;
+        }
+        if (starPressed) { mode = Mode::ROOT; return; }
     } else if (mode == Mode::EDIT_TIMERS) {
         // Edit two timer values in tenths: first TOFF digits [0..DIGITS-1], then TON digits [DIGITS..2*DIGITS-1]
         auto tweakDigit=[&](int &tenths, int whichDigit, int delta){
@@ -357,6 +412,11 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 return;
             } else if (confirmAction == ConfirmAction::RESET_REMOTE) {
                 remoteResetPending = true;
+                exitMenu();
+                return;
+            } else if (confirmAction == ConfirmAction::POWER_CYCLE) {
+                // Request a power cycle (software restart) of the remote
+                powerCyclePending = true;
                 exitMenu();
                 return;
             }
@@ -438,7 +498,7 @@ void MenuSystem::cancelBlankingEdit() {
 
 void MenuSystem::confirmBlankingEdit(bool exitMenuAfter) {
     appliedBlankingSeconds = blankingOptions[blankingIndex];
-    // Future: persist to EEPROM & notify power manager
+    blankSavePending = true; // signal persistence
     mode = Mode::ROOT;
     if (exitMenuAfter) exitMenu();
 }
@@ -474,6 +534,14 @@ void MenuSystem::enterShowRssi() {
     if (auto *comm = CommManager::get()) comm->requestStatusActive();
 }
 void MenuSystem::enterBatteryCal() { mode = Mode::BATTERY_CALIB; calibInProgress = false; }
+void MenuSystem::enterRssiCalib() {
+    inMenu = true;
+    mode = Mode::EDIT_RSSI_CALIB;
+    // Reset edit focus to Low and seed edit values from applied on entry
+    rssiEditIndex = 0; // start editing Low
+    editRssiLowDbm = appliedRssiLowDbm;
+    editRssiHighDbm = appliedRssiHighDbm;
+}
 void MenuSystem::enterEditTimers(float tonSecInit, float toffSecInit) {
     inMenu = true; // treat as a modal to capture input reliably
     mode = Mode::EDIT_TIMERS;

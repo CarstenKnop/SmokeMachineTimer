@@ -100,7 +100,10 @@ int DeviceManager::findDeviceByMac(const uint8_t mac[6]) const {
 void DeviceManager::setActiveIndex(int idx) {
     if (idx < 0 || idx >= (int)devices.size()) { activeIndex = -1; }
     else activeIndex = idx;
-    saveToEEPROM();
+    // Persist only the active index to avoid heavy EEPROM writes that can stall the UI
+    uint8_t activeRaw = (activeIndex < 0) ? 255 : (uint8_t)activeIndex;
+    EEPROM.put(EEPROM_ADDR_ACTIVE, activeRaw);
+    EEPROM.commit();
 }
 
 const SlaveDevice* DeviceManager::getActive() const {

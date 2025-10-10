@@ -32,8 +32,8 @@ public:
     bool justSelected() const { return lastSelectTime && (millis() - lastSelectTime < 400); }
     const char* getLastActionLabel() const { return lastActionLabel; }
     // Editing helpers / modes
-    enum class Mode { ROOT, EDIT_BLANKING, EDIT_TXPOWER, EDIT_BRIGHTNESS, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
-    enum class ConfirmAction { NONE, RESET_SLAVE, RESET_REMOTE };
+    enum class Mode { ROOT, EDIT_BLANKING, EDIT_TXPOWER, EDIT_BRIGHTNESS, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_RSSI_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
+    enum class ConfirmAction { NONE, RESET_SLAVE, RESET_REMOTE, POWER_CYCLE };
     bool isEditing() const { return mode != Mode::ROOT; }
     bool isEditingBlanking() const { return mode == Mode::EDIT_BLANKING; }
     bool isEditingTxPower() const { return mode == Mode::EDIT_TXPOWER; }
@@ -42,10 +42,15 @@ public:
     int getAppliedBlankingSeconds() const { return appliedBlankingSeconds; }
     int8_t getAppliedTxPowerQdbm() const { return appliedTxPowerQdbm; }
     uint8_t getAppliedOledBrightness() const { return appliedOledBrightness; }
+    // Applied RSSI calibration bounds (dBm)
+    int8_t getAppliedRssiLowDbm() const { return appliedRssiLowDbm; }
+    int8_t getAppliedRssiHighDbm() const { return appliedRssiHighDbm; }
     int8_t getEditingTxPowerQdbm() const { return editTxPowerQdbm; }
     uint8_t getEditingOledBrightness() const { return editOledBrightness; }
     void setAppliedTxPowerQdbm(int8_t v) { appliedTxPowerQdbm = v; }
     void setAppliedOledBrightness(uint8_t v) { appliedOledBrightness = v; }
+    void setAppliedRssiLowDbm(int8_t v) { appliedRssiLowDbm = v; }
+    void setAppliedRssiHighDbm(int8_t v) { appliedRssiHighDbm = v; }
     // Placeholder mode state queries
     // Access current mode
     Mode getMode() const { return mode; }
@@ -135,6 +140,7 @@ public:
     void enterTxPower();
     void enterBrightness();
     void enterBatteryCal();
+    void enterRssiCalib();
     void enterEditTimers(float tonSecInit, float toffSecInit);
     // Battery calibration helpers (UI state only)
     void initBatteryCal(uint16_t a0, uint16_t a50, uint16_t a100) { editCalib[0]=a0; editCalib[1]=a50; editCalib[2]=a100; calibInitialized=true; editCalibIndex=0; }
@@ -144,8 +150,11 @@ public:
     void startBlankingEdit();
     void cancelBlankingEdit();
     void confirmBlankingEdit(bool exitMenuAfter = false);
+    void setAppliedBlankingSeconds(int seconds) { appliedBlankingSeconds = seconds; blankingIndex = findBlankingIndexFor(seconds); }
+    bool consumeBlankingSave(int &outSecs) { if (!blankSavePending) return false; blankSavePending=false; outSecs = appliedBlankingSeconds; return true; }
     bool consumeTxPowerSave(int8_t &outQdbm) { if (!txSavePending) return false; txSavePending=false; outQdbm = editTxPowerQdbm; return true; }
     bool consumeBrightnessSave(uint8_t &outLvl) { if (!brightSavePending) return false; brightSavePending=false; outLvl = editOledBrightness; return true; }
+    bool consumeRssiCalibSave(int8_t &outLow, int8_t &outHigh) { if (!rssiSavePending) return false; rssiSavePending=false; outLow = appliedRssiLowDbm; outHigh = appliedRssiHighDbm; return true; }
     // WiFi TX power (qdbm, 0.25 dBm units)
     int8_t editTxPowerQdbm = 84;
     int8_t appliedTxPowerQdbm = 84;
@@ -154,6 +163,18 @@ public:
     uint8_t editOledBrightness = 255;
     uint8_t appliedOledBrightness = 255;
     bool brightSavePending = false;
+    bool blankSavePending = false;
+    // RSSI calibration (dBm)
+    int8_t editRssiLowDbm = -100;
+    int8_t editRssiHighDbm = -80;
+    int8_t appliedRssiLowDbm = -100;
+    int8_t appliedRssiHighDbm = -80;
+    bool rssiSavePending = false;
+    int rssiEditIndex = 0; // 0 = Low, 1 = High
+    // Hold state for RSSI edit
+    unsigned long rssiHoldStartUp = 0;
+    unsigned long rssiHoldStartDown = 0;
+    unsigned long rssiLastRepeatMs = 0;
     int findBlankingIndexFor(int seconds) const;
     void clampScroll();
     // --- Edit timers state ---
@@ -174,10 +195,17 @@ public:
     bool calibSavePending = false;
     uint16_t editCalib[3] = {0,0,0};
     int editCalibIndex = 0; // 0..2
+    // Hold-to-repeat state for calibration editing
+    unsigned long calibHoldStartUp = 0;
+    unsigned long calibHoldStartDown = 0;
+    unsigned long calibLastRepeatMs = 0;
     // RSSI list scroll pos
     int rssiFirstIndex = 0;
     // Remote reset pending flag
     bool remoteResetPending = false;
+    // Power cycle (software restart) pending flag
+    bool powerCyclePending = false;
+    bool consumePowerCycle() { bool v = powerCyclePending; powerCyclePending = false; return v; }
     // Confirmation state
     ConfirmAction confirmAction = ConfirmAction::NONE;
 };

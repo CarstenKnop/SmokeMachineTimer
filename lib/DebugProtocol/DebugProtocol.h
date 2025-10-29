@@ -44,7 +44,9 @@ enum class Command : uint8_t {
     GetDiscoveredDevices = 15,
     PairDiscoveredDevice = 16,
     UnpairDevice = 17,
-    RenameDevice = 18
+    RenameDevice = 18,
+    SetTimerValues = 19,
+    SetTimerOutput = 20
 };
 
 enum class Status : uint8_t {

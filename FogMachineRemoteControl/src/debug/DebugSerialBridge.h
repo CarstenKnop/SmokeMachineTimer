@@ -19,6 +19,7 @@ public:
     void handleTimerPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
 
     const DebugProtocol::TimerStatsPayload& getLastTimerStats() const { return lastTimerStats; }
+    bool isPcConnected() const { return pcConnected; }
 
 private:
     struct PendingRequest {

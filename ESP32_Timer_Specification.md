@@ -17,7 +17,7 @@
 
 - Uses the shared `ReliableProtocol` core for framing (CRC16 verification, packet IDs, ack/nak exchanges, retry windows) so ESP-NOW and debug transports expose identical semantics and statistics.
 - Primary control path is ESP-NOW via `ReliableEspNow`; the timer responds to pairing, output override, name read/write, RSSI queries, and `SET_CHANNEL` updates and broadcasts status packets that include the current channel.
-- On boot, applies the persisted channel once Wi-Fi/ESP-NOW is initialized. Subsequent `SET_CHANNEL` requests are validated, persisted, and applied immediately.
+- On boot, applies the persisted channel once Wi-Fi/ESP-NOW is initialized. Subsequent `SET_CHANNEL` requests are validated, persisted, and applied immediately. When the remote issues a channel hop via the debug bridge it sends `SET_CHANNEL` before retuning locally; the timer must process and ack this message promptly so the follow-up stats queries succeed on the new channel without transient timeouts.
 - `ReliableProtocol::TransportStats` instances back link-health counters (delivered, retried, lost, corrupt) and are queryable via debug requests from the remote.
 - All inbound packets are size-checked against the protocol header and CRC before handling; failures increment stats and are discarded.
 
@@ -60,7 +60,7 @@
 - Timer consumes `DebugProtocol` packets forwarded by the remote (over ESP-NOW) to expose transport stats, recent error codes, and timer configuration snapshots.
 - EEPROM read/write helpers are limited to whitelisted regions (channel storage, timer settings) and reuse existing verification steps before commits.
 - Transport counters are captured atomically before serialization to prevent races with ISR-driven comm loops.
-- Debug responses return current TON/TOFF values, override state, RSSI data, and channel information so the PC diagnostics tool can present real-time telemetry.
+- Debug responses return current TON/TOFF values, override state, RSSI data, and channel information so the PC diagnostics tool can present real-time telemetry. The diagnostics client now retries each per-channel poll until both remote and timer payloads arrive; timers should answer `GetTimerStats` quickly even during scan sweeps so retries converge without exceeding timeout limits.
 
 ## Persistence & Verification
 

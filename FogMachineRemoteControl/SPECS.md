@@ -26,6 +26,7 @@ Resources: Seeed wiki and datasheet links are in code comments and PlatformIO bo
 - Limitation (from Seeed XIAO ESP32C3 wiki): Only D0–D3 support deep-sleep GPIO wake.
 - Our mapping means only UP (D1/GPIO3) and DOWN (D2/GPIO4) can wake the device.
 - The # (GPIO9) and * (GPIO10) buttons cannot wake from deep sleep on this board.
+- Firmware routes the long (* ~3 s) STAR hold through the normal Auto Off pipeline: it blanks the OLED, calls the shared `maybeEnterDeepSleep()` helper, and enters deep sleep once the display is dark. The wake mask still covers UP/DOWN only, so users must tap those buttons to resume.
 
 Fix suggestions if you need #/* to wake:
 
@@ -59,6 +60,7 @@ Implementation:
   - Also available: Pair Timer, Rename Device, Edit Timers, OLED Brightness, WiFi TX Power.
   - Battery Calibration: # starts, then # steps to next point; at last point, # saves+exits; * cancels.
   - Auto Off: configurable display auto-off timeout (0=Off) replaces previous "Display Blanking" terminology; no special EEPROM wake flags are used.
+  - STAR long-hold (3 seconds) now forces an immediate blank + deep sleep using the existing Auto Off routine; HASH long-hold continues to act as "back" within menus.
 
 ## Charger signal polarity
 
@@ -77,7 +79,7 @@ Implementation:
 - `DebugProtocol` defines command/response packets (ping, transport stats, timer state, EEPROM read/write) used by both ESP-NOW debug packets and the serial bridge.
 - `DebugSerialBridge` runs in the remote firmware, forwarding requests from the PC to timers via `CommManager`, aggregating transport metrics from both the ESP-NOW and serial links, and returning structured responses.
 - Transport health (lost frames, retries, uptime, last error) is tracked in `ReliableProtocol::TransportStats` and made fetchable over the debug link to support tooling.
-- A companion Windows diagnostic app (`PCDiagnostics/DebugConsole`) consumes `DebugProtocol` over USB serial, providing live stats, channel data, and EEPROM tools for field analysis.
+- A companion Windows diagnostic app (`PCDiagnostics/DebugConsole`) consumes `DebugProtocol` over USB serial, providing live stats, channel data, and EEPROM tools for field analysis. Channel scans drive gradient heatmaps for both remote and timer RSSI, show per-channel sample counts and last RSSI markers, retry failed polls (Timeout/TransportError/NotReady) up to a capped budget, and log the first failure per channel to aid troubleshooting.
 
 ## Notes
 

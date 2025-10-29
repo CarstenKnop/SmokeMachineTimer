@@ -83,6 +83,7 @@ Responsibilities:
 
 - Persist the selected channel in EEPROM with validation on boot (magic + version guards). Invalid or unsupported entries trigger a factory reset of the channel storage segment.
 - Apply the stored channel to the Wi-Fi/ESP-NOW radio after any temporary scan completes.
+- When a new channel is selected via the debug interface, send the `SET_CHANNEL` protocol message to the active timer while the remote is still tuned to the previous channel, then retune the remote once the request is queued. This ordering guarantees both endpoints remain in sync and prevents timers from timing out on the first post-hop query.
 - Provide a channel survey that asynchronously scans 2.4 GHz channels 1–13, ranks them by AP count and aggregate RSSI, and exposes the ordered list to the UI. The survey parks the radio back on the stored channel when finished.
 - Minimise flash wear: do not rewrite EEPROM if the chosen channel already matches the stored value.
 - Notify CommManager when the stored channel changes so that discovery, pairing, and existing peers hop immediately.
@@ -97,7 +98,7 @@ UI requirements:
 Discovery/pairing now sweeps through all supported channels until a timer responds. CommManager schedules timed hops (e.g., every few hundred milliseconds) across channels 1–13 during discovery to locate timers that were left on another channel. On success, discovery locks back to the stored channel. RemoteChannelManager keeps the stored channel authoritative so subsequent operations stay consistent.
 
 4.2.6. Channel Sync Messaging
-Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sends `SET_CHANNEL` to the target timer so both sides remain on the same channel. Timers acknowledge by switching channels and replying with STATUS.
+Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sends `SET_CHANNEL` to the target timer so both sides remain on the same channel. The message is dispatched before the remote retunes locally to avoid a momentary split. Timers acknowledge by switching channels and replying with STATUS.
 
 5. Pairing and Device Management
 The remote will feature a user-friendly system for discovering, pairing, and managing slave devices.
@@ -241,6 +242,6 @@ Behavior
 - `DebugProtocol` packets encapsulate diagnostic commands (ping, fetch transport stats, enumerate paired timers, read/write timer EEPROM segments, request channel data).
 - Remote firmware instantiates `DebugSerialBridge` to multiplex debug requests between the PC and timers; it forwards requests through `CommManager`, relays responses back over serial, and exposes local transport stats.
 - Debug traffic over ESP-NOW uses the same `DebugProtocol` packet IDs, letting the remote query timers for their `TransportStats`, retry counts, and recent error states.
-- PC tooling (`PCDiagnostics/DebugConsole`, .NET 9 WPF) consumes the serial stream, presenting live link health, channel configuration, and EEPROM editors; it must tolerate hot-plugging and reconnect automatically.
+- PC tooling (`PCDiagnostics/DebugConsole`, .NET 9 WPF) consumes the serial stream, presenting live link health, channel configuration, and EEPROM editors; it must tolerate hot-plugging and reconnect automatically. Channel scans now drive dual heatmap visualisations (remote RSSI vs timer RSSI) with gradient bars. The app retries each sample until both remote and timer stats are returned, annotates channels that fail (Timeout, TransportError, NotReady), and renders per-channel debug bands showing sample counts and the most recent RSSI.
 - Lost-packet/retry counters are backed by per-transport structs in RAM; the debug protocol guarantees atomic snapshots when reporting the stats to avoid torn reads.
 

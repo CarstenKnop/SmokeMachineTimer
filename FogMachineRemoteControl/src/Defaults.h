@@ -56,6 +56,7 @@ namespace Defaults {
   // STAR: threshold to distinguish click vs hold (ms)
   // Choose a value that avoids accidental holds but still feels responsive
   static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 350;
+  static constexpr unsigned long STAR_DEEP_SLEEP_HOLD_MS = 3000;
 
   // Post-action result/info timeout
   static constexpr unsigned long MENU_RESULT_TIMEOUT_MS = 5000;  // 5s message lifetime

@@ -36,7 +36,9 @@ public static class DebugProtocol
         GetDiscoveredDevices = 15,
         PairDiscoveredDevice = 16,
         UnpairDevice = 17,
-        RenameDevice = 18
+        RenameDevice = 18,
+        SetTimerValues = 19,
+        SetTimerOutput = 20
     }
 
     public enum Status : byte
@@ -199,6 +201,8 @@ public static class DebugProtocol
         Command.PairDiscoveredDevice => "PairDiscoveredDevice",
         Command.UnpairDevice => "UnpairDevice",
         Command.RenameDevice => "RenameDevice",
+        Command.SetTimerValues => "SetTimerValues",
+        Command.SetTimerOutput => "SetTimerOutput",
         _ => command.ToString()
     };
 

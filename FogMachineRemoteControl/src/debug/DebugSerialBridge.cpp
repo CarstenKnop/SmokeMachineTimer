@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include "comm/CommManager.h"
 #include "device/DeviceManager.h"
@@ -120,19 +121,26 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
                 respondError(packet, DebugProtocol::Status::InvalidArgument);
                 return;
             }
-            if (persist) {
-                channelManager.storeChannel(newChannel);
-            }
-            channelManager.applyChannel(newChannel);
-            if (informTimer) {
-                const SlaveDevice* active = commManager.getActiveDevice();
-                if (active) {
+            uint8_t previousChannel = channelManager.getActiveChannel();
+            bool channelChanged = (previousChannel != newChannel);
+
+            if (informTimer && channelChanged) {
+                if (const SlaveDevice* active = commManager.getActiveDevice()) {
                     ProtocolMsg update = {};
                     update.cmd = static_cast<uint8_t>(ProtocolCmd::SET_CHANNEL);
                     update.channel = newChannel;
                     commManager.sendProtocol(active->mac, update, "DEBUG-SET_CHANNEL", true, nullptr);
                 }
             }
+
+            if (persist) {
+                channelManager.storeChannel(newChannel);
+            }
+
+            if (channelChanged) {
+                channelManager.applyChannel(newChannel);
+            }
+
             respondToPc(packet, DebugProtocol::Status::Ok);
             break;
         }
@@ -406,6 +414,50 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
                 strncpy(nameBuf, "Timer", sizeof(nameBuf) - 1);
             }
             commManager.renameDeviceByIndex(index, nameBuf);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::SetTimerValues: {
+            if (packet.dataLength < 1 + sizeof(float) * 2) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            if (index >= static_cast<uint8_t>(std::max(deviceManager.getDeviceCount(), 0))) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            float tonSec;
+            float toffSec;
+            memcpy(&tonSec, packet.data + 1, sizeof(float));
+            memcpy(&toffSec, packet.data + 1 + sizeof(float), sizeof(float));
+            if (!std::isfinite(tonSec) || !std::isfinite(toffSec) || tonSec < 0.f || toffSec < 0.f) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            if (!commManager.programTimerByIndex(index, tonSec, toffSec)) {
+                respondError(packet, DebugProtocol::Status::TransportError);
+                return;
+            }
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::SetTimerOutput: {
+            if (packet.dataLength < 2) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            uint8_t mode = packet.data[1];
+            if (index >= static_cast<uint8_t>(std::max(deviceManager.getDeviceCount(), 0)) || mode > 1) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            bool desiredOn = (mode != 0);
+            if (!commManager.setOverrideStateByIndex(index, desiredOn)) {
+                respondError(packet, DebugProtocol::Status::TransportError);
+                return;
+            }
             respondToPc(packet, DebugProtocol::Status::Ok);
             break;
         }

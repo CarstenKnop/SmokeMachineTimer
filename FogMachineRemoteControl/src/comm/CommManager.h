@@ -57,6 +57,8 @@ public:
     int findPairedIndexByMac(const uint8_t mac[6]) const { return deviceManager.findDeviceByMac(mac); }
     void unpairByMac(const uint8_t mac[6]) { int idx = deviceManager.findDeviceByMac(mac); if (idx >= 0) deviceManager.removeDevice(idx); }
     void renameDeviceByIndex(int idx, const char* newName);
+    bool programTimerByIndex(int idx, float tonSec, float toffSec);
+    bool setOverrideStateByIndex(int idx, bool on);
     static CommManager* get() { return instance; }
     // RSSI sniffer control (enable only while on RSSI screen)
     void setRssiSnifferEnabled(bool enable);

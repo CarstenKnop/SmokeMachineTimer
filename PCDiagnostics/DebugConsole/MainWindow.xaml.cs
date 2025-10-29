@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
+using System.Globalization;
 using SmokeMachineDiagnostics.Protocol;
 using SmokeMachineDiagnostics.Services;
 
@@ -25,17 +26,25 @@ public partial class MainWindow : Window
     private readonly Dictionary<byte, TimerListItem> _timerMap = new();
     private readonly ObservableCollection<DiscoveredListItem> _discovered = new();
     private readonly Dictionary<string, DiscoveredListItem> _discoveredMap = new(StringComparer.OrdinalIgnoreCase);
-    private readonly BitmapPlot _remotePlot;
-    private readonly BitmapPlot _timerPlot;
+    private readonly HeatBarPlot _remotePlot;
+    private readonly HeatBarPlot _timerPlot;
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _discoveryCts;
     private byte _lastKnownChannel = 1;
+    private byte _minSampledChannel = 255;
+    private byte _maxSampledChannel = 0;
+    private readonly int[] _remoteSampleCounts = new int[13];
+    private readonly int[] _timerSampleCounts = new int[13];
+    private readonly sbyte[] _remoteLastRssi = Enumerable.Repeat<sbyte>(0, 13).ToArray();
+    private readonly sbyte[] _timerLastRssi = Enumerable.Repeat<sbyte>(0, 13).ToArray();
+    private readonly bool[] _remoteSampleFaultLogged = new bool[13];
+    private readonly bool[] _timerSampleFaultLogged = new bool[13];
 
     public MainWindow()
     {
         InitializeComponent();
-        _remotePlot = new BitmapPlot(364, 240);
-        _timerPlot = new BitmapPlot(364, 240);
+    _remotePlot = new HeatBarPlot(364, 240);
+    _timerPlot = new HeatBarPlot(364, 240);
         RemoteGraphImage.Source = _remotePlot.Bitmap;
         TimerGraphImage.Source = _timerPlot.Bitmap;
         TimersList.ItemsSource = _timers;
@@ -51,6 +60,7 @@ public partial class MainWindow : Window
             _client.Dispose();
         };
         UpdateDiscoveryControls();
+        UpdateHeatmapAxes();
     }
 
     private void RefreshPorts_OnClick(object sender, RoutedEventArgs e) => RefreshPortList();
@@ -351,6 +361,17 @@ public partial class MainWindow : Window
         var sessions = selected.Select(t => new ScannerSession(t, samplesPerChannel, settleMs, sampleMs)).ToList();
         _remotePlot.Clear();
         _timerPlot.Clear();
+        Array.Clear(_remoteSampleCounts, 0, _remoteSampleCounts.Length);
+        Array.Clear(_timerSampleCounts, 0, _timerSampleCounts.Length);
+        Array.Clear(_remoteLastRssi, 0, _remoteLastRssi.Length);
+        Array.Clear(_timerLastRssi, 0, _timerLastRssi.Length);
+        Array.Clear(_remoteSampleFaultLogged, 0, _remoteSampleFaultLogged.Length);
+        Array.Clear(_timerSampleFaultLogged, 0, _timerSampleFaultLogged.Length);
+        _minSampledChannel = 255;
+        _maxSampledChannel = 0;
+        _remotePlot.SetDebugInfo(_remoteSampleCounts, _remoteLastRssi);
+        _timerPlot.SetDebugInfo(_timerSampleCounts, _timerLastRssi);
+        UpdateHeatmapAxes();
         ScanStatusText.Text = "Starting scan...";
         CycleStatusText.Text = string.Empty;
         StartScanButton.IsEnabled = false;
@@ -481,6 +502,24 @@ public partial class MainWindow : Window
         TimerRssi.Text = $"Timer RSSI local={link.RssiLocal} remote={link.RssiPeer}";
         TimerSnapshotText.Text = FormatSnapshot(stats.Timer);
         RemoteSnapshotText.Text = FormatSnapshot(stats.Remote);
+
+        bool updated = false;
+        if (stats.Timer.Channel >= 1 && stats.Timer.Channel <= 13)
+        {
+            foreach (var item in _timers.Where(t => t.Channel == stats.Timer.Channel))
+            {
+                item.UpdateSnapshot(stats.Timer);
+                updated = true;
+            }
+        }
+        if (!updated)
+        {
+            foreach (var item in _timers.Where(t => t.IsActive))
+            {
+                item.UpdateSnapshot(stats.Timer);
+            }
+        }
+        UpdateTimerControlState();
     }
 
     private void HandleRssiReport(DebugProtocol.Packet packet)
@@ -940,21 +979,69 @@ public partial class MainWindow : Window
                 byte[] channelPayload = { channel, 1 };
                 await _client.SendAsync(DebugProtocol.Command.ForceChannel, channelPayload, token).ConfigureAwait(false);
                 await Task.Delay(session.SettleDelayMs, token).ConfigureAwait(false);
-                for (int sample = 0; sample < session.SamplesPerChannel && !token.IsCancellationRequested; sample++)
+                int samplesRecorded = 0;
+                int attempts = 0;
+                int idx = channel - 1;
+                while (samplesRecorded < session.SamplesPerChannel && !token.IsCancellationRequested)
                 {
+                    attempts++;
                     var remotePacket = await _client.SendAsync(DebugProtocol.Command.GetRemoteStats, Array.Empty<byte>(), token).ConfigureAwait(false);
                     var timerPacket = await _client.SendAsync(DebugProtocol.Command.GetTimerStats, Array.Empty<byte>(), token).ConfigureAwait(false);
                     var remotePayload = ExtractStruct<DebugProtocol.RemoteStatsPayload>(remotePacket);
                     var timerPayload = ExtractStruct<DebugProtocol.TimerStatsPayload>(timerPacket);
-                    if (remotePayload != null && timerPayload != null)
+                    bool remoteStatusOk = remotePacket.Status == DebugProtocol.Status.Ok;
+                    bool timerStatusOk = timerPacket.Status == DebugProtocol.Status.Ok;
+                    bool remotePayloadValid = remotePayload.HasValue;
+                    bool timerPayloadValid = timerPayload.HasValue;
+
+                    if (remoteStatusOk && timerStatusOk && remotePayloadValid && timerPayloadValid)
                     {
-                        AppendSample(channel, remotePayload.Value, timerPayload.Value);
+                        var remoteValue = remotePayload.GetValueOrDefault();
+                        var timerValue = timerPayload.GetValueOrDefault();
+                        AppendSample(channel, remoteValue, timerValue);
+                        samplesRecorded++;
+                        if (idx >= 0 && idx < 13)
+                        {
+                            _remoteSampleFaultLogged[idx] = false;
+                            _timerSampleFaultLogged[idx] = false;
+                        }
+                        int displaySample = samplesRecorded;
+                        Dispatcher.Invoke(() =>
+                        {
+                            CycleStatusText.Text = $"Device {session.Timer.DisplayName} ch {channel} sample {displaySample}/{session.SamplesPerChannel}";
+                        });
                     }
-                    Dispatcher.Invoke(() =>
+                    else
                     {
-                        CycleStatusText.Text = $"Device {session.Timer.DisplayName} ch {channel} sample {sample + 1}/{session.SamplesPerChannel}";
-                    });
-                    await Task.Delay(session.SampleDelayMs, token).ConfigureAwait(false);
+                        if (idx >= 0 && idx < 13)
+                        {
+                            if ((!remoteStatusOk || !remotePayloadValid) && !_remoteSampleFaultLogged[idx])
+                            {
+                                AppendLog($"Remote stats unavailable on channel {channel}: status {DebugProtocol.DescribeStatus(remotePacket.Status)} (len={remotePacket.DataLength})");
+                                _remoteSampleFaultLogged[idx] = true;
+                            }
+                            if ((!timerStatusOk || !timerPayloadValid) && !_timerSampleFaultLogged[idx])
+                            {
+                                AppendLog($"Timer stats unavailable on channel {channel}: status {DebugProtocol.DescribeStatus(timerPacket.Status)} (len={timerPacket.DataLength})");
+                                _timerSampleFaultLogged[idx] = true;
+                            }
+                        }
+                        int retryCount = attempts - samplesRecorded;
+                        Dispatcher.Invoke(() =>
+                        {
+                            CycleStatusText.Text = $"Device {session.Timer.DisplayName} ch {channel} retry {retryCount}";
+                        });
+                        if (attempts >= session.SamplesPerChannel * 3)
+                        {
+                            AppendLog($"Giving up on channel {channel} after {attempts} attempts without valid samples.");
+                            break;
+                        }
+                    }
+
+                    if (samplesRecorded < session.SamplesPerChannel && !token.IsCancellationRequested)
+                    {
+                        await Task.Delay(session.SampleDelayMs, token).ConfigureAwait(false);
+                    }
                 }
             }
         }
@@ -992,6 +1079,19 @@ public partial class MainWindow : Window
         {
             _remotePlot.AddSample(channel, remoteRssi, false);
             _timerPlot.AddSample(channel, timerRssi, true);
+            UpdateHeatmapAxes();
+            if (channel < _minSampledChannel) _minSampledChannel = channel;
+            if (channel > _maxSampledChannel) _maxSampledChannel = channel;
+            int idx = channel - 1;
+            if (idx >= 0 && idx < 13)
+            {
+                _remoteSampleCounts[idx]++;
+                _timerSampleCounts[idx]++;
+                _remoteLastRssi[idx] = remoteRssi;
+                _timerLastRssi[idx] = timerRssi;
+            }
+            _remotePlot.SetDebugInfo(_remoteSampleCounts, _remoteLastRssi);
+            _timerPlot.SetDebugInfo(_timerSampleCounts, _timerLastRssi);
         });
     }
 
@@ -1007,6 +1107,238 @@ public partial class MainWindow : Window
         int total = _timers.Count;
         int selected = _timers.Count(t => t.IsSelected);
         SelectionSummaryText.Text = total == 0 ? "No timers loaded." : $"Selected {selected} of {total}.";
+        UpdateTimerControlState();
+    }
+
+    private void UpdateHeatmapAxes()
+    {
+        UpdateAxisLabels(_remotePlot, RemoteAxisMaxText, RemoteAxisMidText, RemoteAxisMinText);
+        UpdateAxisLabels(_timerPlot, TimerAxisMaxText, TimerAxisMidText, TimerAxisMinText);
+    }
+
+    private static void UpdateAxisLabels(HeatBarPlot plot, TextBlock maxText, TextBlock midText, TextBlock minText)
+    {
+        var range = plot.GetRange();
+        string maxLabel = $"{range.maxDbm.ToString(CultureInfo.InvariantCulture)} dBm";
+        string minLabel = $"{range.minDbm.ToString(CultureInfo.InvariantCulture)} dBm";
+        int midValue = (int)Math.Round((range.maxDbm + range.minDbm) / 2.0);
+        string midLabel = $"{midValue.ToString(CultureInfo.InvariantCulture)} dBm";
+        maxText.Text = maxLabel;
+        midText.Text = midLabel;
+        minText.Text = minLabel;
+        double opacity = range.hasSamples ? 1.0 : 0.6;
+        maxText.Opacity = opacity;
+        midText.Opacity = opacity;
+        minText.Opacity = opacity;
+    }
+
+    private void UpdateTimerControlState()
+    {
+        bool connected = _client.IsConnected;
+        var selected = GetSelectedTimers();
+        bool hasSelection = selected.Count > 0;
+
+        ApplyTimerValuesButton.IsEnabled = connected && hasSelection;
+        ActivateOutputButton.IsEnabled = connected && hasSelection;
+        DeactivateOutputButton.IsEnabled = connected && hasSelection;
+
+        if (selected.Count == 1)
+        {
+            var item = selected[0];
+            SetTimerInputIfNotFocused(TimerTonInput, item.TonSeconds);
+            SetTimerInputIfNotFocused(TimerToffInput, item.ToffSeconds);
+        }
+        else if (selected.Count == 0)
+        {
+            var active = _timers.FirstOrDefault(t => t.IsActive);
+            if (active != null)
+            {
+                SetTimerInputIfNotFocused(TimerTonInput, active.TonSeconds);
+                SetTimerInputIfNotFocused(TimerToffInput, active.ToffSeconds);
+            }
+        }
+        else
+        {
+            if (!TimerTonInput.IsFocused)
+            {
+                TimerTonInput.Text = string.Empty;
+            }
+            if (!TimerToffInput.IsFocused)
+            {
+                TimerToffInput.Text = string.Empty;
+            }
+        }
+    }
+
+    private void SetTimerInputIfNotFocused(TextBox box, float value)
+    {
+        if (box.IsFocused)
+        {
+            return;
+        }
+        if (value > 0.0f)
+        {
+            box.Text = value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            box.Text = string.Empty;
+        }
+    }
+
+    private List<TimerListItem> GetSelectedTimers() => _timers.Where(t => t.IsSelected).ToList();
+
+    private List<TimerListItem> ResolveTimerTargets()
+    {
+        var targets = GetSelectedTimers();
+        if (targets.Count == 0)
+        {
+            var active = _timers.FirstOrDefault(t => t.IsActive);
+            if (active != null)
+            {
+                targets.Add(active);
+            }
+        }
+        return targets;
+    }
+
+    private void SetTimerControlStatus(string message)
+    {
+        TimerControlStatusText.Text = message;
+    }
+
+    private bool TryGetTimerInputs(out float ton, out float toff)
+    {
+        ton = 0f;
+        toff = 0f;
+        if (!float.TryParse(TimerTonInput.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out ton))
+        {
+            return false;
+        }
+        if (!float.TryParse(TimerToffInput.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out toff))
+        {
+            return false;
+        }
+        if (ton < 0f || toff < 0f)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    private async void ApplyTimerValuesButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!_client.IsConnected)
+        {
+            SetTimerControlStatus("Connect before applying values.");
+            return;
+        }
+        if (!TryGetTimerInputs(out float ton, out float toff))
+        {
+            SetTimerControlStatus("Enter valid Ton/Toff values (>= 0).");
+            return;
+        }
+
+        var targets = ResolveTimerTargets();
+        if (targets.Count == 0)
+        {
+            SetTimerControlStatus("Load timers and select at least one entry.");
+            return;
+        }
+
+        SetTimerControlStatus("Applying timer values...");
+        try
+        {
+            foreach (var timer in targets)
+            {
+                var payload = new byte[1 + sizeof(float) * 2];
+                payload[0] = timer.Index;
+                Buffer.BlockCopy(BitConverter.GetBytes(ton), 0, payload, 1, sizeof(float));
+                Buffer.BlockCopy(BitConverter.GetBytes(toff), 0, payload, 1 + sizeof(float), sizeof(float));
+                var response = await _client.SendAsync(DebugProtocol.Command.SetTimerValues, payload, _uiCts.Token);
+                if (response.Status != DebugProtocol.Status.Ok)
+                {
+                    SetTimerControlStatus($"Failed on {timer.DisplayName}: {DebugProtocol.DescribeStatus(response.Status)}");
+                    return;
+                }
+                timer.UpdateSnapshot(new DebugProtocol.TimerSnapshot
+                {
+                    TonSeconds = ton,
+                    ToffSeconds = toff,
+                    OutputOn = timer.OutputOn ? (byte)1 : (byte)0,
+                    Channel = timer.Channel
+                });
+            }
+            SetTimerControlStatus($"Applied Ton {ton:F1}s / Toff {toff:F1}s to {targets.Count} timer(s).");
+            UpdateTimerControlState();
+        }
+        catch (OperationCanceledException)
+        {
+            SetTimerControlStatus("Apply canceled.");
+        }
+        catch (Exception ex)
+        {
+            SetTimerControlStatus($"Apply failed: {ex.Message}");
+        }
+    }
+
+    private async void ActivateOutputButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ApplyOutputOverrideAsync(true);
+    }
+
+    private async void DeactivateOutputButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ApplyOutputOverrideAsync(false);
+    }
+
+    private async Task ApplyOutputOverrideAsync(bool desiredOn)
+    {
+        if (!_client.IsConnected)
+        {
+            SetTimerControlStatus("Connect before controlling output.");
+            return;
+        }
+
+        var targets = ResolveTimerTargets();
+        if (targets.Count == 0)
+        {
+            SetTimerControlStatus("Load timers and select at least one entry.");
+            return;
+        }
+
+        SetTimerControlStatus(desiredOn ? "Activating output..." : "Deactivating output...");
+        byte mode = desiredOn ? (byte)1 : (byte)0;
+        try
+        {
+            foreach (var timer in targets)
+            {
+                var payload = new[] { timer.Index, mode };
+                var response = await _client.SendAsync(DebugProtocol.Command.SetTimerOutput, payload, _uiCts.Token);
+                if (response.Status != DebugProtocol.Status.Ok)
+                {
+                    SetTimerControlStatus($"Failed on {timer.DisplayName}: {DebugProtocol.DescribeStatus(response.Status)}");
+                    return;
+                }
+                timer.UpdateSnapshot(new DebugProtocol.TimerSnapshot
+                {
+                    TonSeconds = timer.TonSeconds,
+                    ToffSeconds = timer.ToffSeconds,
+                    OutputOn = mode,
+                    Channel = timer.Channel
+                });
+            }
+            SetTimerControlStatus(desiredOn ? $"Activated {targets.Count} timer(s)." : $"Deactivated {targets.Count} timer(s).");
+            UpdateTimerControlState();
+        }
+        catch (OperationCanceledException)
+        {
+            SetTimerControlStatus("Command canceled.");
+        }
+        catch (Exception ex)
+        {
+            SetTimerControlStatus((desiredOn ? "Activate" : "Deactivate") + $" failed: {ex.Message}");
+        }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1066,6 +1398,9 @@ internal sealed class TimerListItem : INotifyPropertyChanged
     private bool _isActive;
     private bool _isSelected;
     private byte _channel;
+    private float _tonSeconds;
+    private float _toffSeconds;
+    private bool _outputOn;
 
     public TimerListItem(byte index)
     {
@@ -1113,6 +1448,7 @@ internal sealed class TimerListItem : INotifyPropertyChanged
             if (SetField(ref _channel, value))
             {
                 OnPropertyChanged(nameof(ChannelText));
+                OnPropertyChanged(nameof(SummaryText));
             }
         }
     }
@@ -1120,6 +1456,53 @@ internal sealed class TimerListItem : INotifyPropertyChanged
     public string ActiveMarker => IsActive ? "(active)" : string.Empty;
 
     public string ChannelText => Channel >= 1 && Channel <= 13 ? $"Channel {Channel}" : "Channel ?";
+
+    public float TonSeconds
+    {
+        get => _tonSeconds;
+        private set
+        {
+            if (SetField(ref _tonSeconds, value))
+            {
+                OnPropertyChanged(nameof(SummaryText));
+            }
+        }
+    }
+
+    public float ToffSeconds
+    {
+        get => _toffSeconds;
+        private set
+        {
+            if (SetField(ref _toffSeconds, value))
+            {
+                OnPropertyChanged(nameof(SummaryText));
+            }
+        }
+    }
+
+    public bool OutputOn
+    {
+        get => _outputOn;
+        private set
+        {
+            if (SetField(ref _outputOn, value))
+            {
+                OnPropertyChanged(nameof(SummaryText));
+            }
+        }
+    }
+
+    public string SummaryText
+    {
+        get
+        {
+            string ton = TonSeconds > 0.01f ? TonSeconds.ToString("F1", CultureInfo.InvariantCulture) : "?";
+            string toff = ToffSeconds > 0.01f ? ToffSeconds.ToString("F1", CultureInfo.InvariantCulture) : "?";
+            string state = OutputOn ? "ON" : "OFF";
+            return $"Ton {ton}s / Toff {toff}s | Output {state}";
+        }
+    }
 
     public void Apply(byte channel, string name, string mac, bool isActive)
     {
@@ -1132,6 +1515,7 @@ internal sealed class TimerListItem : INotifyPropertyChanged
         {
             IsSelected = true;
         }
+        OnPropertyChanged(nameof(SummaryText));
     }
 
     public void SetActive(bool value)
@@ -1140,6 +1524,18 @@ internal sealed class TimerListItem : INotifyPropertyChanged
         if (IsActive && !IsSelected)
         {
             IsSelected = true;
+        }
+        OnPropertyChanged(nameof(SummaryText));
+    }
+
+    public void UpdateSnapshot(DebugProtocol.TimerSnapshot snapshot)
+    {
+        TonSeconds = snapshot.TonSeconds;
+        ToffSeconds = snapshot.ToffSeconds;
+        OutputOn = snapshot.OutputOn != 0;
+        if (snapshot.Channel >= 1 && snapshot.Channel <= 13)
+        {
+            Channel = snapshot.Channel;
         }
     }
 
@@ -1327,68 +1723,186 @@ internal sealed class ScannerSession
     public int SampleDelayMs { get; }
 }
 
-internal sealed class BitmapPlot
+internal sealed class HeatBarPlot
 {
     private const byte ChannelCount = 13;
+    private const int DefaultMinDbm = -100;
+    private const int DefaultMaxDbm = -30;
+    private const int BackgroundColor = unchecked((int)0xFF101018);
+    private const int ColumnBaseColor = unchecked((int)0xFF1C2534);
+    private const int ColumnSeparatorColor = unchecked((int)0xFF0C111B);
+    private const int BarBackgroundColor = unchecked((int)0xFF232D40);
     private readonly int _width;
     private readonly int _height;
-    private readonly WriteableBitmap _bitmap;
     private readonly int _columnWidth;
-    private int _nextRow;
+    private readonly WriteableBitmap _bitmap;
+    private readonly Dictionary<int, int>[] _histograms;
+    private readonly int[] _debugCounts = new int[ChannelCount];
+    private readonly sbyte[] _debugLastRssi = new sbyte[ChannelCount];
+    private bool _hasSamples;
+    private int _globalMinDbm = DefaultMinDbm;
+    private int _globalMaxDbm = DefaultMaxDbm;
+    private int _globalMaxCount = 1;
 
-    public BitmapPlot(int width, int height)
+    public HeatBarPlot(int width, int height)
     {
         _width = Math.Max(width, ChannelCount);
         _height = Math.Max(height, 1);
         _columnWidth = Math.Max(1, _width / ChannelCount);
         _bitmap = new WriteableBitmap(_width, _height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
-        Clear();
+        _histograms = new Dictionary<int, int>[ChannelCount];
+        for (int i = 0; i < ChannelCount; i++)
+        {
+            _histograms[i] = new Dictionary<int, int>();
+        }
+        RenderAll();
     }
 
     public WriteableBitmap Bitmap => _bitmap;
 
-    public unsafe void Clear()
+    public void Clear()
     {
-        _bitmap.Lock();
-        try
+        for (int i = 0; i < ChannelCount; i++)
         {
-            Span<int> pixels = new(_bitmap.BackBuffer.ToPointer(), _width * _height);
-            pixels.Fill(unchecked((int)0xFF101018));
-            _bitmap.AddDirtyRect(new Int32Rect(0, 0, _width, _height));
-            _nextRow = 0;
+            _histograms[i].Clear();
         }
-        finally
-        {
-            _bitmap.Unlock();
-        }
+        _hasSamples = false;
+        _globalMinDbm = DefaultMinDbm;
+        _globalMaxDbm = DefaultMaxDbm;
+        _globalMaxCount = 1;
+        RenderAll();
     }
 
-    public unsafe void AddSample(byte channel, sbyte rssi, bool isTimer)
+    public void AddSample(byte channel, sbyte rssi, bool _)
     {
         if (channel < 1 || channel > ChannelCount)
         {
             channel = 1;
         }
-        double normalized = Math.Clamp(-(double)rssi, 0, 100);
-        uint color = ColorFor(normalized, isTimer);
-        int row = _nextRow;
-        _nextRow = (_nextRow + 1) % _height;
-        int startX = (channel - 1) * _columnWidth;
-        int endX = (channel == ChannelCount) ? _width : Math.Min(_width, startX + _columnWidth);
+        int dbm = Math.Clamp((int)rssi, -120, 0);
+        int index = channel - 1;
+        var hist = _histograms[index];
+        hist.TryGetValue(dbm, out int current);
+        hist[dbm] = current + 1;
+
+        bool rangeChanged = false;
+        bool scaleChanged = false;
+
+        if (!_hasSamples)
+        {
+            _hasSamples = true;
+            _globalMinDbm = dbm;
+            _globalMaxDbm = dbm;
+            rangeChanged = true;
+        }
+        if (dbm < _globalMinDbm)
+        {
+            _globalMinDbm = dbm;
+            rangeChanged = true;
+        }
+        if (dbm > _globalMaxDbm)
+        {
+            _globalMaxDbm = dbm;
+            rangeChanged = true;
+        }
+        if (hist[dbm] > _globalMaxCount)
+        {
+            _globalMaxCount = hist[dbm];
+            scaleChanged = true;
+        }
+
+        _debugCounts[index]++;
+        _debugLastRssi[index] = rssi;
+
+        if (rangeChanged || scaleChanged)
+        {
+            RenderAll();
+        }
+        else
+        {
+            RenderChannel(index);
+        }
+    }
+
+    public void SetDebugInfo(int[] counts, sbyte[] lastRssi)
+    {
+        for (int i = 0; i < ChannelCount; i++)
+        {
+            _debugCounts[i] = (counts != null && i < counts.Length) ? counts[i] : 0;
+            _debugLastRssi[i] = (lastRssi != null && i < lastRssi.Length) ? lastRssi[i] : (sbyte)0;
+        }
+        RenderAll();
+    }
+
+    public (bool hasSamples, int minDbm, int maxDbm) GetRange()
+    {
+        return _hasSamples ? (true, _globalMinDbm, _globalMaxDbm) : (false, DefaultMinDbm, DefaultMaxDbm);
+    }
+
+    private void RenderAll()
+    {
+        RenderInternal(-1);
+    }
+
+    private void RenderChannel(int index)
+    {
+        RenderInternal(index);
+    }
+
+    private unsafe void RenderInternal(int channelIndex)
+    {
+        int minDbm = _hasSamples ? _globalMinDbm : DefaultMinDbm;
+        int maxDbm = _hasSamples ? _globalMaxDbm : DefaultMaxDbm;
+        if (minDbm > maxDbm)
+        {
+            (minDbm, maxDbm) = (maxDbm, minDbm);
+        }
+        int levels = Math.Max(1, maxDbm - minDbm + 1);
+        double pixelsPerLevel = (double)_height / levels;
+
         _bitmap.Lock();
         try
         {
             Span<int> pixels = new(_bitmap.BackBuffer.ToPointer(), _width * _height);
-            int offset = row * _width;
-            for (int x = 0; x < _width; x++)
+            if (channelIndex < 0)
             {
-                pixels[offset + x] = unchecked((int)0xFF101018);
+                pixels.Fill(BackgroundColor);
+                for (int ch = 0; ch < ChannelCount; ch++)
+                {
+                    PaintColumnBaseline(pixels, ch);
+                }
             }
-            for (int x = startX; x < endX; x++)
+            else
             {
-                pixels[offset + x] = unchecked((int)color);
+                var (start, width) = GetColumnBounds(channelIndex);
+                ClearColumn(pixels, start, width);
+                PaintColumnBaseline(pixels, channelIndex);
             }
-            _bitmap.AddDirtyRect(new Int32Rect(0, row, _width, 1));
+
+            if (_hasSamples)
+            {
+                if (channelIndex < 0)
+                {
+                    for (int ch = 0; ch < ChannelCount; ch++)
+                    {
+                        RenderColumn(pixels, ch, minDbm, maxDbm, pixelsPerLevel);
+                    }
+                }
+                else
+                {
+                    RenderColumn(pixels, channelIndex, minDbm, maxDbm, pixelsPerLevel);
+                }
+            }
+
+            if (channelIndex < 0)
+            {
+                _bitmap.AddDirtyRect(new Int32Rect(0, 0, _width, _height));
+            }
+            else
+            {
+                var (start, width) = GetColumnBounds(channelIndex);
+                _bitmap.AddDirtyRect(new Int32Rect(start, 0, width, _height));
+            }
         }
         finally
         {
@@ -1396,15 +1910,228 @@ internal sealed class BitmapPlot
         }
     }
 
-    private static uint ColorFor(double value, bool isTimer)
+    private (int start, int width) GetColumnBounds(int index)
     {
-        byte intensity = (byte)Math.Clamp(value * 2.55, 0, 255);
-        if (intensity == 0)
+        int start = index * _columnWidth;
+        int end = (index == ChannelCount - 1) ? _width : Math.Min(_width, start + _columnWidth);
+        int width = Math.Max(1, end - start);
+        return (start, width);
+    }
+
+    private void ClearColumn(Span<int> pixels, int start, int width)
+    {
+        for (int y = 0; y < _height; y++)
         {
-            return 0xFF101018;
+            int rowOffset = y * _width + start;
+            for (int x = 0; x < width; x++)
+            {
+                pixels[rowOffset + x] = BackgroundColor;
+            }
         }
-        return isTimer
-            ? (uint)(0xFF000000 | (intensity << 16))
-            : (uint)(0xFF000000 | (intensity << 8));
+    }
+
+    private void PaintColumnBaseline(Span<int> pixels, int channelIndex)
+    {
+        var (start, width) = GetColumnBounds(channelIndex);
+        for (int y = 0; y < _height; y++)
+        {
+            int rowOffset = y * _width + start;
+            for (int x = 0; x < width; x++)
+            {
+                pixels[rowOffset + x] = ColumnBaseColor;
+            }
+            pixels[rowOffset + width - 1] = ColumnSeparatorColor;
+        }
+
+        // draw simple tick marks for debug info at bottom 3 rows (count) and top pixel last RSSI indicator
+        int count = _debugCounts[channelIndex];
+        if (count > 0)
+        {
+            byte intensity = (byte)Math.Clamp(40 + Math.Min(count, 50) * 4, 40, 220);
+            int debugColor = unchecked((int)(0xFF000000u | ((uint)intensity << 16) | ((uint)intensity << 8) | intensity));
+            for (int y = _height - 3; y < _height; y++)
+            {
+                int rowOffset = y * _width + start;
+                for (int x = 0; x < width - 1; x++)
+                {
+                    pixels[rowOffset + x] = debugColor;
+                }
+            }
+        }
+        sbyte last = _debugLastRssi[channelIndex];
+        if (count > 0)
+        {
+            // draw a single pixel at the corresponding level so it is obvious what the last sample was
+            int level = Math.Clamp((int)last, -120, 0);
+            double normalized = (level - _globalMinDbm) / Math.Max(1, _globalMaxDbm - _globalMinDbm);
+            int y = _height - 1 - (int)Math.Round(normalized * (_height - 1));
+            y = Math.Clamp(y, 0, _height - 1);
+            int offset = y * _width + start + width / 2;
+            pixels[offset] = unchecked((int)0xFFFFFFFF);
+        }
+    }
+
+    private void RenderColumn(Span<int> pixels, int channelIndex, int minDbm, int maxDbm, double pixelsPerLevel)
+    {
+        var hist = _histograms[channelIndex];
+        if (hist.Count == 0)
+        {
+            return;
+        }
+
+        var (start, width) = GetColumnBounds(channelIndex);
+        int channelMin = Math.Clamp(hist.Keys.Min(), minDbm, maxDbm);
+        int channelMax = Math.Clamp(hist.Keys.Max(), minDbm, maxDbm);
+        var (barTop, _) = RowBoundsFor(channelMax, minDbm, maxDbm, pixelsPerLevel);
+        var (_, barBottom) = RowBoundsFor(channelMin, minDbm, maxDbm, pixelsPerLevel);
+
+        var sortedLevels = hist.Keys.OrderBy(level => level).ToList();
+
+        for (int y = barTop; y < barBottom; y++)
+        {
+            int rowOffset = y * _width + start;
+            for (int x = 0; x < width; x++)
+            {
+                pixels[rowOffset + x] = BarBackgroundColor;
+            }
+        }
+
+        if (sortedLevels.Count == 0)
+        {
+            return;
+        }
+
+        for (int y = barTop; y < barBottom; y++)
+        {
+            double level = maxDbm - ((y + 0.5) / pixelsPerLevel);
+            level = Math.Clamp(level, channelMin, channelMax);
+            uint color = SampleColorForLevel(hist, sortedLevels, level, _globalMaxCount);
+            int packed = unchecked((int)color);
+            int rowOffset = y * _width + start;
+            for (int x = 0; x < width; x++)
+            {
+                pixels[rowOffset + x] = packed;
+            }
+        }
+    }
+
+    private (int top, int bottom) RowBoundsFor(int dbm, int minDbm, int maxDbm, double pixelsPerLevel)
+    {
+        dbm = Math.Clamp(dbm, minDbm, maxDbm);
+        double top = (maxDbm - dbm) * pixelsPerLevel;
+        double bottom = top + pixelsPerLevel;
+        int topRow = (int)Math.Floor(top);
+        int bottomRow = (int)Math.Ceiling(bottom);
+        if (bottomRow <= topRow)
+        {
+            bottomRow = topRow + 1;
+        }
+        topRow = Math.Clamp(topRow, 0, _height - 1);
+        bottomRow = Math.Clamp(bottomRow, topRow + 1, _height);
+        return (topRow, bottomRow);
+    }
+
+    private static uint HeatColor(int count, int maxCount)
+    {
+        if (maxCount <= 0)
+        {
+            maxCount = 1;
+        }
+        double normalized = Math.Clamp((double)count / maxCount, 0.0, 1.0);
+        return InterpolateHeat(normalized);
+    }
+
+    private static uint InterpolateHeat(double t)
+    {
+        t = Math.Clamp(t, 0.0, 1.0);
+        double r;
+        double g;
+        double b;
+        if (t <= 0.5)
+        {
+            double local = t / 0.5;
+            r = 1.0;
+            g = (60.0 + local * (225.0 - 60.0)) / 255.0;
+            b = 32.0 / 255.0;
+        }
+        else
+        {
+            double local = (t - 0.5) / 0.5;
+            r = (255.0 - local * 255.0) / 255.0;
+            g = 1.0;
+            b = (32.0 + local * (160.0 - 32.0)) / 255.0;
+        }
+        uint ur = (uint)Math.Clamp((int)Math.Round(r * 255.0), 0, 255);
+        uint ug = (uint)Math.Clamp((int)Math.Round(g * 255.0), 0, 255);
+        uint ub = (uint)Math.Clamp((int)Math.Round(b * 255.0), 0, 255);
+        return 0xFF000000u | (ur << 16) | (ug << 8) | ub;
+    }
+
+    private static uint SampleColorForLevel(Dictionary<int, int> hist, List<int> sortedLevels, double targetLevel, int maxCount)
+    {
+        if (sortedLevels.Count == 0)
+        {
+            return unchecked((uint)BarBackgroundColor);
+        }
+
+        double epsilon = 1e-3;
+
+        for (int i = 0; i < sortedLevels.Count; i++)
+        {
+            int level = sortedLevels[i];
+            if (Math.Abs(targetLevel - level) <= epsilon)
+            {
+                return HeatColor(hist[level], maxCount);
+            }
+        }
+
+        if (targetLevel <= sortedLevels[0])
+        {
+            return HeatColor(hist[sortedLevels[0]], maxCount);
+        }
+        if (targetLevel >= sortedLevels[^1])
+        {
+            return HeatColor(hist[sortedLevels[^1]], maxCount);
+        }
+
+        int upperIndex = 0;
+        while (upperIndex < sortedLevels.Count && sortedLevels[upperIndex] < targetLevel)
+        {
+            upperIndex++;
+        }
+
+        int upperLevel = sortedLevels[upperIndex];
+        int lowerLevel = sortedLevels[upperIndex - 1];
+
+        double span = upperLevel - lowerLevel;
+        if (span <= epsilon)
+        {
+            return HeatColor(hist[upperLevel], maxCount);
+        }
+
+        double weight = (targetLevel - lowerLevel) / span;
+        uint lowerColor = HeatColor(hist[lowerLevel], maxCount);
+        uint upperColor = HeatColor(hist[upperLevel], maxCount);
+        return LerpColor(lowerColor, upperColor, weight);
+    }
+
+    private static uint LerpColor(uint c0, uint c1, double t)
+    {
+        t = Math.Clamp(t, 0.0, 1.0);
+        double r0 = ((c0 >> 16) & 0xFF) / 255.0;
+        double g0 = ((c0 >> 8) & 0xFF) / 255.0;
+        double b0 = (c0 & 0xFF) / 255.0;
+        double r1 = ((c1 >> 16) & 0xFF) / 255.0;
+        double g1 = ((c1 >> 8) & 0xFF) / 255.0;
+        double b1 = (c1 & 0xFF) / 255.0;
+
+        double r = r0 + (r1 - r0) * t;
+        double g = g0 + (g1 - g0) * t;
+        double b = b0 + (b1 - b0) * t;
+
+        uint ur = (uint)Math.Clamp((int)Math.Round(r * 255.0), 0, 255);
+        uint ug = (uint)Math.Clamp((int)Math.Round(g * 255.0), 0, 255);
+        uint ub = (uint)Math.Clamp((int)Math.Round(b * 255.0), 0, 255);
+        return 0xFF000000u | (ur << 16) | (ug << 8) | ub;
     }
 }

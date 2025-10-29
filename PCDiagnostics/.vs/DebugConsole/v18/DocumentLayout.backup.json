@@ -9,6 +9,10 @@
     {
       "AbsoluteMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|x:\\sd\\xiao_esp32c3\\smokemachinetimer\\pcdiagnostics\\debugconsole\\protocol\\debugprotocol.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|solutionrelative:debugconsole\\protocol\\debugprotocol.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|x:\\sd\\xiao_esp32c3\\smokemachinetimer\\pcdiagnostics\\debugconsole\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|solutionrelative:debugconsole\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -18,7 +22,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 9,
+          "SelectedChildIndex": 10,
           "Children": [
             {
               "$type": "Bookmark",
@@ -54,16 +58,27 @@
             },
             {
               "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "DebugConsole\\MainWindow.xaml.cs",
+              "ToolTip": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\MainWindow.xaml.cs",
+              "RelativeToolTip": "DebugConsole\\MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-10-29T20:51:04.14Z"
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 1,
               "Title": "DebugProtocol.cs",
               "DocumentMoniker": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\Protocol\\DebugProtocol.cs",
               "RelativeDocumentMoniker": "DebugConsole\\Protocol\\DebugProtocol.cs",
               "ToolTip": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\Protocol\\DebugProtocol.cs",
               "RelativeToolTip": "DebugConsole\\Protocol\\DebugProtocol.cs",
-              "ViewState": "AgIAANMAAAAAAAAAAIBZwAAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAANEAAAAAAAAAAABhwAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-10-29T19:04:35.951Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-10-29T19:04:35.951Z"
             },
             {
               "$type": "Document",

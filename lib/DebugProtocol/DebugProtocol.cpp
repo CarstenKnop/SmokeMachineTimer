@@ -49,6 +49,8 @@ const char* commandToString(Command cmd) {
         case Command::PairDiscoveredDevice: return "PairDiscoveredDevice";
         case Command::UnpairDevice: return "UnpairDevice";
         case Command::RenameDevice: return "RenameDevice";
+        case Command::SetTimerValues: return "SetTimerValues";
+        case Command::SetTimerOutput: return "SetTimerOutput";
         default: return "Unknown";
     }
 }

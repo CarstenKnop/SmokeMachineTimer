@@ -20,6 +20,8 @@ public:
     void drawUpdateCountdown(uint8_t secondsRemaining) const;
     // Draw a one-line boot status at the bottom of the splash (y≈54)
     void drawBootStatus(const char* msg) const;
+    void setPreventBlanking(bool value);
+    void blankNow();
 private:
     mutable Adafruit_SSD1306 display;
     bool inited = false;
@@ -28,6 +30,7 @@ private:
     // Blanking state
     mutable bool isBlanked = false;
     mutable unsigned long lastWakeMs = 0;
+    bool preventBlanking = false;
     int selectedSda = -1;
     int selectedScl = -1;
     void splash();

@@ -50,6 +50,31 @@ void DisplayManager::begin() {
 	lastWakeMs = millis();
 }
 
+void DisplayManager::setPreventBlanking(bool value) {
+	if (preventBlanking == value) {
+		return;
+	}
+	preventBlanking = value;
+	if (preventBlanking) {
+		lastWakeMs = millis();
+		if (isBlanked) {
+			isBlanked = false;
+			display.ssd1306_command(SSD1306_DISPLAYON);
+		}
+	}
+}
+
+void DisplayManager::blankNow() {
+	if (!inited) {
+		return;
+	}
+	preventBlanking = false;
+	if (!isBlanked) {
+		isBlanked = true;
+		display.ssd1306_command(SSD1306_DISPLAYOFF);
+	}
+}
+
 void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu, const ButtonInput& buttons) {
 	if (!inited) {
 		// If init failed, draw a minimal error panel repeatedly
@@ -66,12 +91,16 @@ void DisplayManager::render(const DeviceManager& deviceMgr, const BatteryMonitor
 	// Wake on any interaction
 	bool anyActive = buttons.upHeld() || buttons.downHeld() || buttons.hashHeld() || buttons.starHeld() ||
 					 buttons.upPressed() || buttons.downPressed() || buttons.hashPressed() || buttons.starPressed();
-	if (anyActive) {
+	bool keepAwake = anyActive || preventBlanking;
+	if (keepAwake) {
 		lastWakeMs = millis();
 		if (isBlanked) { isBlanked = false; display.ssd1306_command(SSD1306_DISPLAYON); }
 	}
 	// Handle Auto Off based on applied seconds
 	int blankSecs = menu.getAppliedBlankingSeconds();
+	if (preventBlanking) {
+		blankSecs = 0;
+	}
 	if (blankSecs > 0) {
 		unsigned long now = millis();
 		if (!isBlanked && (now - lastWakeMs) >= (unsigned long)blankSecs * 1000UL) {

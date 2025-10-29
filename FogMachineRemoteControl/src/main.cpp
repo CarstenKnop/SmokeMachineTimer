@@ -26,8 +26,10 @@
 #include <driver/rtc_io.h>
 
 
-// Forward declare deep sleep helper used at end of loop
+// Forward declare deep sleep helpers used at end of loop
 static void maybeEnterDeepSleep(const DisplayManager& disp);
+static void enterDeepSleepNow();
+static bool runUpdateCountdown(ButtonInput& buttons, DisplayManager& display);
 
 DisplayManager displayMgr;
 ButtonInput buttons(BUTTON_UP_GPIO, BUTTON_DOWN_GPIO, BUTTON_HASH_GPIO, BUTTON_STAR_GPIO);
@@ -67,30 +69,18 @@ void setup() {
   if (CHARGER_PWR_PIN >= 0) { pinMode(CHARGER_PWR_PIN, Defaults::CHARGER_PWR_ACTIVE_HIGH ? INPUT : INPUT_PULLUP); }
   // Inform user if we woke from deep sleep
   displayMgr.drawBootStatus(wokeFromDeepSleep ? "Boot: woke from deep sleep" : "Boot: cold start");
-  // Boot-time failsafe: hold UP to enter update window; show a 2s prompt before proceeding
+  bool updateCountdownArmed = false;
+  // Boot-time failsafe: user must hold UP through boot to enter update window
   {
-    // Debounce/settle a few cycles
+    // Debounce/settle a few cycles and capture initial state
     for (int i = 0; i < 4; ++i) { buttons.update(); delay(5); }
-  displayMgr.drawBootStatus("Hold UP for update (2s)");
+    updateCountdownArmed = buttons.upHeld();
+    displayMgr.drawBootStatus("Hold UP through boot for update");
     unsigned long promptUntil = millis() + 2000UL;
-    bool upDown = false;
     while (millis() < promptUntil) {
       buttons.update();
-      if (buttons.upHeld() || buttons.upPressed()) { upDown = true; }
+      if (buttons.upHeld()) { updateCountdownArmed = true; }
       delay(10);
-    }
-    if (upDown) {
-      // Start update mode with a full-screen update panel (clears any prior text)
-      uint32_t until = millis() + 60000UL; // 60s window
-      displayMgr.drawUpdateCountdown((uint8_t)((until - millis() + 999) / 1000));
-      // Keep a fixed 60s window regardless of release once detected
-      while (millis() < until) {
-        uint8_t remaining = (uint8_t)((until - millis() + 999) / 1000);
-        displayMgr.drawUpdateCountdown(remaining);
-        buttons.update();
-        delay(50);
-      }
-      displayMgr.drawBootStatus("Update: window closed");
     }
   }
   menu.begin();
@@ -113,6 +103,15 @@ void setup() {
   debugBridge.begin();
   // Kick an initial status request so main screen (RSSI/bars) populates quickly after boot
   comm.requestStatusActive();
+
+  // Check whether UP remained held through boot to trigger update countdown
+  buttons.update();
+  bool updateCountdownReady = updateCountdownArmed && (buttons.upHeld() || buttons.upPressed());
+  if (updateCountdownReady) {
+    displayMgr.drawBootStatus("Update: countdown (*/cancel)");
+    runUpdateCountdown(buttons, displayMgr);
+    buttons.update();
+  }
 
   // Apply stored TX power, OLED brightness, and display blanking
   menu.setAppliedTxPowerQdbm(rconfig.getTxPowerQdbm());
@@ -171,6 +170,7 @@ void loop() {
     static unsigned long starDownMs = 0;
     static bool appliedHold = false;
     static bool pressAfterExit = false;
+    static bool deepSleepIssued = false;
     bool pressEdge = buttons.starPressed();
     bool held = buttons.starHeld();
     unsigned long nowMs = millis();
@@ -179,26 +179,33 @@ void loop() {
     if (pressEdge) {
       starDownMs = nowMs;
       pressAfterExit = (exitTime == 0) || (nowMs >= exitTime);
+      appliedHold = false;
+      deepSleepIssued = false;
     }
-    // Hold action only if this press started after exit
-    if (pressAfterExit && held && starDownMs && (nowMs - starDownMs >= Defaults::STAR_HOLD_THRESHOLD_MS) && !appliedHold) {
-      // Start hold: force ON
-      comm.overrideActive(true);
-      appliedHold = true;
+    if (pressAfterExit && held && starDownMs) {
+      unsigned long heldMs = nowMs - starDownMs;
+      if (!deepSleepIssued && heldMs >= Defaults::STAR_DEEP_SLEEP_HOLD_MS) {
+        deepSleepIssued = true;
+        displayMgr.blankNow();
+        maybeEnterDeepSleep(displayMgr);
+      } else if (!appliedHold && heldMs >= Defaults::STAR_HOLD_THRESHOLD_MS) {
+        comm.overrideActive(true);
+        appliedHold = true;
+      }
     }
-    // Release edge detection: was down (starDownMs!=0) and now not held
     if (starDownMs && !held) {
       unsigned long heldMs = nowMs - starDownMs;
-      if (heldMs >= Defaults::STAR_HOLD_THRESHOLD_MS) {
-        // End hold: turn OFF
-        comm.overrideActive(false);
-      } else {
-        // Short click: toggle
-        if (pressAfterExit) comm.toggleActive();
+      if (!deepSleepIssued && pressAfterExit) {
+        if (heldMs >= Defaults::STAR_HOLD_THRESHOLD_MS) {
+          comm.overrideActive(false);
+        } else {
+          comm.toggleActive();
+        }
       }
       appliedHold = false;
       starDownMs = 0;
       pressAfterExit = false;
+      deepSleepIssued = false;
     }
   }
 
@@ -327,6 +334,7 @@ void loop() {
   static unsigned long lastDisplay = 0;
   unsigned long now = millis();
   if (now - lastDisplay > 33) { // ~30Hz
+    displayMgr.setPreventBlanking(debugBridge.isPcConnected());
     displayMgr.render(deviceMgr, battery, menu, buttons);
     lastDisplay = now;
   }
@@ -411,19 +419,45 @@ void loop() {
 // without hardware changes, we select a single wake pin (GPIO9 = '#') and use ALL_LOW.
 // If you later rewire for active-high with pulldowns, you can switch to ANY_HIGH and include
 // all buttons in the mask to wake on any button.
-static void maybeEnterDeepSleep(const DisplayManager& disp) {
-  if (!disp.isBlank()) return;
-  // Per Seeed XIAO ESP32C3 docs, only D0~D3 support deep-sleep GPIO wake.
-  // Our buttons use D1 (UP=GPIO3) and D2 (DOWN=GPIO4). Restrict wake to these pins for reliable wake.
-  const uint64_t wake_mask = (1ULL<<BUTTON_UP_GPIO) | (1ULL<<BUTTON_DOWN_GPIO);
-  // Configure wake-up GPIOs and set pull-ups for active-low buttons during deep sleep
-  gpio_wakeup_enable((gpio_num_t)BUTTON_UP_GPIO,   GPIO_INTR_LOW_LEVEL);
+static void configureDeepSleepWakePins() {
+  const uint64_t wake_mask = (1ULL << BUTTON_UP_GPIO) | (1ULL << BUTTON_DOWN_GPIO);
+  gpio_wakeup_enable((gpio_num_t)BUTTON_UP_GPIO, GPIO_INTR_LOW_LEVEL);
   gpio_wakeup_enable((gpio_num_t)BUTTON_DOWN_GPIO, GPIO_INTR_LOW_LEVEL);
-  // Enable internal pull-ups to keep lines high while sleeping (avoid floating)
   gpio_pullup_en((gpio_num_t)BUTTON_UP_GPIO);
   gpio_pullup_en((gpio_num_t)BUTTON_DOWN_GPIO);
-  // Hold configuration during deep sleep so pulls remain active
   gpio_deep_sleep_hold_en();
   esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_LOW);
+}
+
+static void enterDeepSleepNow() {
+  Serial.println("[REMOTE] Entering deep sleep...");
+  configureDeepSleepWakePins();
   esp_deep_sleep_start();
+}
+
+static bool runUpdateCountdown(ButtonInput& buttons, DisplayManager& display) {
+  const uint32_t windowMs = 60000UL;
+  uint32_t endMs = millis() + windowMs;
+  while (true) {
+    uint32_t nowMs = millis();
+    int32_t remainingMs = static_cast<int32_t>(endMs - nowMs);
+    if (remainingMs <= 0) {
+      break;
+    }
+    uint8_t remaining = static_cast<uint8_t>((static_cast<uint32_t>(remainingMs) + 999U) / 1000U);
+    display.drawUpdateCountdown(remaining);
+    buttons.update();
+    if (buttons.starPressed()) {
+      display.drawBootStatus("Update canceled");
+      return false;
+    }
+    delay(50);
+  }
+  display.drawBootStatus("Update: window closed");
+  return true;
+}
+
+static void maybeEnterDeepSleep(const DisplayManager& disp) {
+  if (!disp.isBlank()) return;
+  enterDeepSleepNow();
 }

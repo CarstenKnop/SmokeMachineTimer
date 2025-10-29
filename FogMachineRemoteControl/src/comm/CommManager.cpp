@@ -483,9 +483,42 @@ void CommManager::renameDeviceByIndex(int idx, const char* newName) {
     requestStatus(updated);
 }
 
+bool CommManager::programTimerByIndex(int idx, float tonSec, float toffSec) {
+    if (idx < 0 || idx >= deviceManager.getDeviceCount()) {
+        return false;
+    }
+    const SlaveDevice& dev = deviceManager.getDevice(idx);
+    ProtocolMsg msg = {};
+    msg.cmd = static_cast<uint8_t>(ProtocolCmd::SET_TIMER);
+    msg.ton = tonSec;
+    msg.toff = toffSec;
+    bool queued = sendProtocol(dev.mac, msg, "SET_TIMER-PC", true, cmdContext(ProtocolCmd::SET_TIMER));
+    if (queued) {
+        requestStatus(dev);
+    }
+    return queued;
+}
+
+bool CommManager::setOverrideStateByIndex(int idx, bool on) {
+    if (idx < 0 || idx >= deviceManager.getDeviceCount()) {
+        return false;
+    }
+    const SlaveDevice& dev = deviceManager.getDevice(idx);
+    ProtocolMsg msg = {};
+    msg.cmd = static_cast<uint8_t>(ProtocolCmd::OVERRIDE_OUTPUT);
+    msg.outputOverride = on;
+    bool queued = sendProtocol(dev.mac, msg, "OVERRIDE-PC", true, cmdContext(ProtocolCmd::OVERRIDE_OUTPUT));
+    if (queued) {
+        requestStatus(dev);
+    }
+    return queued;
+}
+
 bool CommManager::sendProtocol(const uint8_t* mac, ProtocolMsg& msg, const char* tag, bool requireAck, void* context) {
     if (!mac) return false;
-    msg.channel = channelManager.getStoredChannel();
+    if (msg.channel == 0) {
+        msg.channel = channelManager.getStoredChannel();
+    }
     ReliableProtocol::SendConfig cfg;
     cfg.requireAck = requireAck;
     cfg.retryIntervalMs = Defaults::COMM_RETRY_INTERVAL_MS;

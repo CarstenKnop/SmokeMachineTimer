@@ -1,0 +1,458 @@
+﻿<Window x:Class="SmokeMachineDiagnostics.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smoke Machine Diagnostics" Height="720" Width="1200" Background="#101018">
+
+    <Window.Resources>
+        <!-- Modern Dark Theme Palette -->
+        <SolidColorBrush x:Key="PrimaryBackground" Color="#1E1E1E"/>
+        <SolidColorBrush x:Key="SecondaryBackground" Color="#2D2D30"/>
+        <SolidColorBrush x:Key="AccentColor" Color="#007ACC"/>
+        <SolidColorBrush x:Key="HighlightColor" Color="#3E3E42"/>
+        <SolidColorBrush x:Key="BorderColor" Color="#3F3F46"/>
+        <SolidColorBrush x:Key="TextColor" Color="#D4D4D4"/>
+        <SolidColorBrush x:Key="MutedTextColor" Color="#808080"/>
+
+        <!-- Default Styles -->
+        <Style TargetType="Window">
+            <Setter Property="Background" Value="{StaticResource PrimaryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Background" Value="{StaticResource SecondaryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentColor}"/>
+            <Setter Property="FontWeight" Value="ExtraBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource AccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="2">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource HighlightColor}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource SecondaryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <!-- Fully Themed ComboBox Style -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="20" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource SecondaryBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="1" />
+                <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Data="M 0 0 L 4 4 L 8 0 Z" Fill="{StaticResource TextColor}" />
+            </Grid>
+        </ControlTemplate>
+
+        <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="SnapsToDevicePixels" Value="true"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="HorizontalContentAlignment" Value="{Binding HorizontalContentAlignment, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"/>
+            <Setter Property="VerticalContentAlignment" Value="{Binding VerticalContentAlignment, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                        <Border x:Name="Bd" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="true">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HighlightColor}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource SecondaryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton" Template="{StaticResource ComboBoxToggleButton}" Focusable="false" IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press"/>
+                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="3,3,23,3" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <TextBox x:Name="PART_EditableTextBox" Style="{x:Null}" Template="{x:Null}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,3,23,3" Focusable="True" Background="Transparent" Foreground="{StaticResource TextColor}" Visibility="Hidden" IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Grid x:Name="DropDown" SnapsToDevicePixels="True" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder" Background="{StaticResource SecondaryBackground}" BorderThickness="1" BorderBrush="{StaticResource BorderColor}"/>
+                                    <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                    </ScrollViewer>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="2"/>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="4"/>
+        </Style>
+
+        <Style TargetType="ListView">
+            <Setter Property="Background" Value="{StaticResource SecondaryBackground}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style TargetType="ListViewItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="4,2">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{StaticResource HighlightColor}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource HighlightColor}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="3*"/>
+            <RowDefinition Height="2*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Connection controls -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Serial" FontWeight="Bold"/>
+                    <TextBlock x:Name="SerialTransportStats" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Snapshot" FontWeight="Bold"/>
+                    <TextBlock x:Name="RemoteSnapshotText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="13"/>
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="Timer" Grid.Column="1" Margin="6,0,12,0">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Transport" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerTransportStats" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="RSSI" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerRssi" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Snapshot" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerSnapshotText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="13"/>
+        </StackPanel>
+
+        <!-- Status row -->
+        <Grid Grid.Row="1" Margin="0,16,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <GroupBox Header="Remote" Margin="0,0,12,0">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Transport" FontWeight="Bold"/>
+                    <TextBlock x:Name="RemoteTransportStats" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Serial" FontWeight="Bold"/>
+                    <TextBlock x:Name="SerialTransportStats" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Snapshot" FontWeight="Bold"/>
+                    <TextBlock x:Name="RemoteSnapshotText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="13"/>
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="Timer" Grid.Column="1" Margin="6,0,12,0">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Transport" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerTransportStats" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="RSSI" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerRssi" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Snapshot" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerSnapshotText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="13"/>
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="Scan Status" Grid.Column="2" >
+                <StackPanel Margin="8">
+                    <TextBlock Text="Overall" FontWeight="Bold"/>
+                    <TextBlock x:Name="ScanStatusText" Margin="0,4,0,8" FontSize="13"/>
+                    <TextBlock Text="Cycle" FontWeight="Bold"/>
+                    <TextBlock x:Name="CycleStatusText" Margin="0,4,0,0" FontSize="13"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <!-- Graphs and selection -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid Margin="0,0,16,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <GroupBox Header="Channel Scan" Grid.Row="0" >
+                    <Grid Margin="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="349*"/>
+                            <ColumnDefinition Width="84*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8" Grid.ColumnSpan="2">
+                            <TextBlock Text="Samples/channel:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="SamplesPerChannelInput" Width="60" Text="5" Margin="0,0,12,0"/>
+                            <TextBlock Text="Settle ms:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="SettleDelayInput" Width="60" Text="120" Margin="0,0,12,0"/>
+                            <TextBlock Text="Sample ms:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="SampleDelayInput" Width="60" Text="40"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12" Grid.ColumnSpan="2">
+                            <Button x:Name="StartScanButton" Content="Start Scan" Width="110" Click="StartScanButton_OnClick" Margin="0,0,12,0"/>
+                            <Button x:Name="StopScanButton" Content="Stop" Width="90" Click="StopScanButton_OnClick" IsEnabled="False" Margin="0,0,12,0"/>
+                            <TextBlock x:Name="SelectionSummaryText" VerticalAlignment="Center" Text="Select one or more timers."/>
+                        </StackPanel>
+                        <Border Grid.Row="2" CornerRadius="8" Padding="4" Grid.ColumnSpan="2">
+                            <ListView x:Name="TimersList" SelectionMode="Extended">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Vertical" Margin="0,0,0,8">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" Content="{Binding DisplayName}" FontSize="13" Checked="TimerCheckBox_OnChanged" Unchecked="TimerCheckBox_OnChanged"/>
+                                                <TextBlock Text="{Binding ActiveMarker}" FontSize="12" Foreground="OrangeRed" Margin="8,0,0,0"/>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding ChannelText}" FontSize="12" Foreground="Gray" Margin="24,2,0,0"/>
+                                            <TextBlock Text="{Binding SummaryText}" FontSize="12" Foreground="Gray" Margin="24,0,0,0"/>
+                                            <TextBlock Text="{Binding MacString}" FontSize="12" Foreground="Gray" Margin="24,0,0,0"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Border>
+                    </Grid>
+                </GroupBox>
+                <GroupBox Header="Timer Control" Grid.Row="1" Margin="0,5,0,0">
+                    <Grid Margin="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Select one or more timers above to program values or control output." FontSize="12" Foreground="Gray"/>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Ton (s):" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TimerTonInput" Width="80" Margin="4,0,12,0"/>
+                            <TextBlock Text="Toff (s):" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TimerToffInput" Width="80" Margin="4,0,12,0"/>
+                            <Button x:Name="ApplyTimerValuesButton" Content="Apply" Width="100" Click="ApplyTimerValuesButton_OnClick"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button x:Name="ActivateOutputButton" Content="Activate Output" Width="140" Click="ActivateOutputButton_OnClick" Margin="0,0,12,0"/>
+                            <Button x:Name="DeactivateOutputButton" Content="Deactivate Output" Width="140" Click="DeactivateOutputButton_OnClick" Margin="0,0,12,0"/>
+                            <TextBlock x:Name="TimerControlStatusText" VerticalAlignment="Center" FontSize="12" Foreground="Gray"/>
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
+            </Grid>
+
+            <Grid Grid.Column="1" Margin="0,0,16,0">
+                <GroupBox Header="Discovery &amp; Pairing" Grid.Row="1">
+                    <Grid Margin="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Grid.Column="0" Margin="0,0,12,0">
+                                <Button x:Name="StartDiscoveryButton" Content="Start Discovery" Width="130" Click="StartDiscoveryButton_OnClick" Margin="0,0,12,0"/>
+                                <Button x:Name="StopDiscoveryButton" Content="Stop" Width="90" Click="StopDiscoveryButton_OnClick" Margin="0,0,12,0" IsEnabled="False"/>
+                                <Button x:Name="RefreshDiscoveryButton" Content="Refresh" Width="90" Click="RefreshDiscoveryButton_OnClick"/>
+                            </StackPanel>
+                            <TextBlock x:Name="DiscoveryStatusText" Grid.Column="1" FontSize="12" Foreground="Gray" VerticalAlignment="Center" Text="Discovery idle."/>
+                        </Grid>
+                        <Grid Grid.Row="1" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="240"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" CornerRadius="8" Padding="4">
+                                <ListView x:Name="DiscoveredList" SelectionMode="Single" SelectionChanged="DiscoveredList_OnSelectionChanged">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Vertical" Margin="0,0,0,8">
+                                                <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13"/>
+                                                <TextBlock Text="{Binding PairingText}" FontSize="12" Foreground="Gray" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding MetaText}" FontSize="12" Foreground="Gray"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                <TextBlock Text="Actions" FontWeight="Bold" FontSize="13"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button x:Name="PairButton" Content="Pair" Width="90" Click="PairButton_OnClick" Margin="0,0,12,0" IsEnabled="False"/>
+                                    <Button x:Name="UnpairButton" Content="Unpair" Width="90" Click="UnpairButton_OnClick" IsEnabled="False"/>
+                                </StackPanel>
+                                <TextBlock Text="Rename" FontWeight="Bold" FontSize="13" Margin="0,16,0,4"/>
+                                <TextBox x:Name="RenameInput" Margin="0,0,0,8"/>
+                                <Button x:Name="RenameButton" Content="Apply" Width="100" Click="RenameButton_OnClick" IsEnabled="False"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </GroupBox>
+            </Grid>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <GroupBox Header="Remote Signal Heatmap" Margin="0,0,0,5">
+                    <Grid Margin="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Column="0" Grid.Row="0" Margin="0,0,12,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="RemoteAxisMaxText" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="RemoteAxisMidText" Grid.Row="1" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="RemoteAxisMinText" Grid.Row="2" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Border Grid.Column="1" Grid.Row="0" Background="#101018" Padding="8" CornerRadius="8">
+                            <Image x:Name="RemoteGraphImage" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                        </Border>
+                        <UniformGrid Grid.Column="1" Grid.Row="1" Columns="13" Margin="0,8,0,0">
+                            <TextBlock Text="1" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="2" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="3" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="4" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="5" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="6" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="7" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="8" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="9" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="10" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="11" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="12" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="13" HorizontalAlignment="Center" Foreground="Gray"/>
+                        </UniformGrid>
+                    </Grid>
+                </GroupBox>
+                <GroupBox Header="Timer Signal Heatmap" Grid.Row="1">
+                    <Grid Margin="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Column="0" Grid.Row="0" Margin="0,0,12,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="TimerAxisMaxText" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="TimerAxisMidText" Grid.Row="1" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TimerAxisMinText" Grid.Row="2" Text="--" Foreground="Gray" FontSize="12" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Border Grid.Column="1" Grid.Row="0" Background="#101018" Padding="8" CornerRadius="8">
+                            <Image x:Name="TimerGraphImage" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                        </Border>
+                        <UniformGrid Grid.Column="1" Grid.Row="1" Columns="13" Margin="0,8,0,0">
+                            <TextBlock Text="1" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="2" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="3" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="4" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="6" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="7" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="8" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="9" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="10" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="11" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="12" HorizontalAlignment="Center" Foreground="Gray"/>
+                            <TextBlock Text="13" HorizontalAlignment="Center" Foreground="Gray"/>
+                        </UniformGrid>
+                    </Grid>
+                </GroupBox>
+            </Grid>
+        </Grid>
+
+        <!-- Log output -->
+        <TextBox Grid.Row="3" x:Name="LogOutput" Margin="0"
+                 TextWrapping="Wrap"
+                 IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
+    </Grid>
+</Window>

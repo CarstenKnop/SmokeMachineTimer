@@ -70,6 +70,15 @@ Implementation:
 - PlatformIO environment: `xiao_esp32c3`
 - Arduino-ESP32 core; OLED via Adafruit SSD1306/GFX.
 
+## Diagnostics & Debugging
+
+- The USB CDC serial port exposes a reliable diagnostic channel layered on the shared `ReliableProtocol` core (CRC16 frames, ack/nak retries, transport stats).
+- `ReliableSerial` wraps the hardware UART and mirrors ESP-NOW reliability semantics so higher layers can share framing, packet IDs, and retransmit logic.
+- `DebugProtocol` defines command/response packets (ping, transport stats, timer state, EEPROM read/write) used by both ESP-NOW debug packets and the serial bridge.
+- `DebugSerialBridge` runs in the remote firmware, forwarding requests from the PC to timers via `CommManager`, aggregating transport metrics from both the ESP-NOW and serial links, and returning structured responses.
+- Transport health (lost frames, retries, uptime, last error) is tracked in `ReliableProtocol::TransportStats` and made fetchable over the debug link to support tooling.
+- A companion Windows diagnostic app (`PCDiagnostics/DebugConsole`) consumes `DebugProtocol` over USB serial, providing live stats, channel data, and EEPROM tools for field analysis.
+
 ## Notes
 
 - Only draw the battery indicator on the main screen to keep menu uncluttered.

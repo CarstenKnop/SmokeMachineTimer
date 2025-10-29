@@ -12,6 +12,7 @@
 #include "ui/InputInterpreter.h"
 #include "menu/MenuSystem.h"
 #include "debug/DebugMetrics.h"
+#include "debug/DebugSerialBridge.h"
 #include "device/DeviceManager.h"
 #include "comm/CommManager.h"
 #include "battery/BatteryMonitor.h"
@@ -38,6 +39,7 @@ RemoteChannelManager channelMgr;
 CommManager comm(deviceMgr, channelMgr);
 InputInterpreter inputInterp;
 RemoteConfig rconfig;
+DebugSerialBridge debugBridge(comm, deviceMgr, channelMgr);
 
 static void wipeRemoteEeprom() {
   for (int i = 0; i < 512; ++i) {
@@ -107,6 +109,8 @@ void setup() {
   displayMgr.drawBootStatus("Boot: battery OK");
   comm.begin();
   displayMgr.drawBootStatus("Boot: comm OK");
+  comm.attachDebugBridge(&debugBridge);
+  debugBridge.begin();
   // Kick an initial status request so main screen (RSSI/bars) populates quickly after boot
   comm.requestStatusActive();
 
@@ -248,6 +252,7 @@ void loop() {
   }
 
   comm.loop();
+  debugBridge.loop();
 
   // Status polling only on main screen (not in menu), when display is not blank, and when we have an active device
   static unsigned long lastStatusReq = 0;

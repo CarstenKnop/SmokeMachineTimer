@@ -3,6 +3,9 @@
 #pragma once
 #include <Arduino.h>
 #include "protocol/Protocol.h"
+#include "ReliableEspNow.h"
+#include "ReliableProtocol.h"
+#include "DebugProtocol.h"
 #include "timer/TimerController.h"
 #include "config/DeviceConfig.h"
 #include "config/TimerChannelSettings.h"
@@ -20,9 +23,12 @@ private:
     TimerController& timer;
     DeviceConfig& config;
     TimerChannelSettings& channelSettings;
-    void sendStatus(const uint8_t* mac, uint8_t seq = 0);
-    void sendAck(const uint8_t* mac, uint8_t seq, ProtocolCmd refCmd, ProtocolStatus status);
-    void processCommand(const ProtocolMsg& msg, const uint8_t* mac);
+    void sendStatus(const uint8_t* mac, bool requireAck = true);
+    ReliableProtocol::HandlerResult processCommand(const ProtocolMsg& msg, const uint8_t* mac);
+    ReliableProtocol::HandlerResult handleFrame(const uint8_t* mac, const uint8_t* payload, size_t len);
+    ReliableProtocol::HandlerResult handleDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
+    void ensurePeer(const uint8_t* mac);
+    ReliableEspNow::Link reliableLink;
     static EspNowComm* instance;
     // RSSI capture via promiscuous callback
     static void wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type);

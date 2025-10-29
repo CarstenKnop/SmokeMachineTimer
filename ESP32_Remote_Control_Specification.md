@@ -42,8 +42,14 @@ Double the read value to calculate the true battery voltage.
 
 Convert the calculated voltage to a percentage using a predefined mapping (e.g., 4.2V = 100%, 3.2V = 0%).
 
-4. ESP-NOW Communication
-4.1. Dynamic Peer Management
+4. Communications Architecture
+4.1. Shared ReliableProtocol Core
+- All transports (ESP-NOW and UART debug) share the `ReliableProtocol` library for framing, CRC16 integrity checks, packet IDs, retransmit windows, and transport statistics.
+- `ReliableProtocol::TransportStats` tracks counters for delivered, retried, lost, and corrupt frames plus timestamps for last error; these metrics must remain thread-safe and queryable at runtime.
+- Message structs (STATUS, COMMAND, DEBUG) are validated against the protocol header length and CRC before processing; mismatches increment the stats and are dropped.
+
+4.2. ESP-NOW Transport
+4.2.1. Dynamic Peer Management
 To control a virtually unlimited number of slaves, the remote will not maintain a persistent list of ESP-NOW peers. Instead, it will manage peers dynamically for each transmission.
 
 Workflow:
@@ -58,10 +64,10 @@ Call esp_now_send() to transmit the command.
 
 On successful delivery acknowledgment (or timeout), call esp_now_del_peer() to unregister the device.
 
-4.2. Message Structure
+4.2.2. Message Structure
 All communications use a standardized struct to ensure consistency between the remote and all slave devices. The device name is limited to 9 characters (name[10] with NUL), and STATUS includes rssiAtTimer. Messages are strictly validated by struct size.
 
-4.3. Status Update Strategy (Push + Poll Hybrid)
+4.2.3. Status Update Strategy (Push + Poll Hybrid)
 - The remote polls the active device periodically and on user actions (e.g., after Select/Reset/Toggle/Set Timer).
 - Slaves must proactively push a STATUS packet to the remote on significant state changes:
    - Output state transitions (OFF->ON or ON->OFF)
@@ -70,7 +76,7 @@ All communications use a standardized struct to ensure consistency between the r
 - For many slaves in the environment, push traffic is bounded because only the selected/active device typically changes frequently; background devices send rare updates (at state transitions).
 - The remote de-duplicates rapid identical STATUS packets within a short window (e.g., 150 ms) to avoid display thrash.
 
-4.4. Channel Management
+4.2.4. Channel Management
 The remote owns the active ESP-NOW channel for the system. A dedicated Channel Settings menu covers persistence, scanning, and synchronization.
 
 Responsibilities:
@@ -87,10 +93,10 @@ UI requirements:
 - User can trigger a scan, select a candidate, and commit. Saving updates EEPROM, reapplies the channel, and emits a protocol update to connected timers.
 - While a scan is running the menu reflects the in-progress state; cancelling clears interim results.
 
-4.5. Discovery Channel Sweep
+4.2.5. Discovery Channel Sweep
 Discovery/pairing now sweeps through all supported channels until a timer responds. CommManager schedules timed hops (e.g., every few hundred milliseconds) across channels 1–13 during discovery to locate timers that were left on another channel. On success, discovery locks back to the stored channel. RemoteChannelManager keeps the stored channel authoritative so subsequent operations stay consistent.
 
-4.6. Channel Sync Messaging
+4.2.6. Channel Sync Messaging
 Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sends `SET_CHANNEL` to the target timer so both sides remain on the same channel. Timers acknowledge by switching channels and replying with STATUS.
 
 5. Pairing and Device Management
@@ -228,4 +234,13 @@ Behavior
          - Instructions: “Connect USB and flash.”, “Hold STAR to keep window.”, “Release STAR to boot.”
          - Status line: “Waiting for update...” (on the same line where a countdown would normally appear).
 - Fallback: If the OLED/I2C fails to initialize, the on-screen message may not render, but the update window logic still runs, leaving ample time to flash.
+
+## 9. Diagnostics & Debugging
+
+- USB CDC serial (115200 baud) hosts a `ReliableSerial` transport that reuses `ReliableProtocol` framing, providing ack/nak retries and stats identical to ESP-NOW.
+- `DebugProtocol` packets encapsulate diagnostic commands (ping, fetch transport stats, enumerate paired timers, read/write timer EEPROM segments, request channel data).
+- Remote firmware instantiates `DebugSerialBridge` to multiplex debug requests between the PC and timers; it forwards requests through `CommManager`, relays responses back over serial, and exposes local transport stats.
+- Debug traffic over ESP-NOW uses the same `DebugProtocol` packet IDs, letting the remote query timers for their `TransportStats`, retry counts, and recent error states.
+- PC tooling (`PCDiagnostics/DebugConsole`, .NET 9 WPF) consumes the serial stream, presenting live link health, channel configuration, and EEPROM editors; it must tolerate hot-plugging and reconnect automatically.
+- Lost-packet/retry counters are backed by per-transport structs in RAM; the debug protocol guarantees atomic snapshots when reporting the stats to avoid torn reads.
 

@@ -13,9 +13,7 @@ enum class ProtocolCmd : uint8_t {
     CALIBRATE_BATTERY = 8,
     TOGGLE_STATE = 9,
     FACTORY_RESET = 10,
-    SET_CHANNEL = 11,
-    ACK = 12,
-    NAK = 13
+    SET_CHANNEL = 11
 };
 
 enum class ProtocolStatus : uint8_t {
@@ -37,7 +35,5 @@ struct __attribute__((packed)) ProtocolMsg {
     int8_t rssiAtTimer;   // RSSI measured at timer for last packet from remote
     uint16_t calibAdc[3]; // battery calibration ADC points
     uint8_t channel;      // preferred ESP-NOW channel for coordination
-    uint8_t seq;          // sequence id for ACK/NAK correlation (0 => no ack expected)
-    uint8_t refCmd;       // echoed command when responding with ACK/NAK
-    uint8_t status;       // ProtocolStatus (meaningful for ACK/NAK/STATUS)
+    uint8_t reserved[3];  // pad to maintain alignment
 };

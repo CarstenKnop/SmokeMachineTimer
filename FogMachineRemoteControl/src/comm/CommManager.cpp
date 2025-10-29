@@ -4,12 +4,14 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <algorithm>
+#include <cstdint>
 #include "protocol/Protocol.h"
 #include "Pins.h"
 #include <esp_wifi.h>
 #include "Defaults.h"
 #include <esp_wifi_types.h>
 #include "channel/RemoteChannelManager.h"
+#include "debug/DebugSerialBridge.h"
 
 namespace {
 const char* cmdToString(ProtocolCmd cmd) {
@@ -25,8 +27,6 @@ const char* cmdToString(ProtocolCmd cmd) {
         case ProtocolCmd::TOGGLE_STATE: return "TOGGLE_STATE";
         case ProtocolCmd::FACTORY_RESET: return "FACTORY_RESET";
         case ProtocolCmd::SET_CHANNEL: return "SET_CHANNEL";
-        case ProtocolCmd::ACK: return "ACK";
-        case ProtocolCmd::NAK: return "NAK";
         default: return "UNKNOWN";
     }
 }
@@ -41,13 +41,22 @@ const char* statusToString(ProtocolStatus status) {
         default: return "UNSPECIFIED";
     }
 }
+
+void* cmdContext(ProtocolCmd cmd) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(cmd));
+}
+
+ProtocolCmd contextToCmd(void* ctx) {
+    if (!ctx) return ProtocolCmd::STATUS;
+    return static_cast<ProtocolCmd>(reinterpret_cast<uintptr_t>(ctx));
+}
 }
 
 // Status request helpers (reuse PAIR command as a lightweight status poll)
 void CommManager::requestStatus(const SlaveDevice& dev) {
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::PAIR; // interpret as status poll when already paired
-    queueMessage(dev.mac, msg, true, "STATUS-REQ");
+    sendProtocol(dev.mac, msg, "STATUS-REQ", true, cmdContext(ProtocolCmd::PAIR));
 }
 
 void CommManager::requestStatusActive() {
@@ -61,7 +70,7 @@ void CommManager::resetActive() {
     if (!act) return;
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::RESET_STATE;
-    queueMessage(act->mac, msg, true, "RESET");
+    sendProtocol(act->mac, msg, "RESET", true, cmdContext(ProtocolCmd::RESET_STATE));
     requestStatus(*act);
 }
 
@@ -70,7 +79,7 @@ void CommManager::toggleActive() {
     if (!act) return;
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::TOGGLE_STATE;
-    queueMessage(act->mac, msg, true, "TOGGLE");
+    sendProtocol(act->mac, msg, "TOGGLE", true, cmdContext(ProtocolCmd::TOGGLE_STATE));
     requestStatus(*act);
 }
 
@@ -80,7 +89,7 @@ void CommManager::overrideActive(bool on) {
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::OVERRIDE_OUTPUT;
     msg.outputOverride = on;
-    queueMessage(act->mac, msg, true, "OVERRIDE");
+    sendProtocol(act->mac, msg, "OVERRIDE", true, cmdContext(ProtocolCmd::OVERRIDE_OUTPUT));
 }
 
 
@@ -99,6 +108,20 @@ void CommManager::begin() {
     }
     channelManager.applyStoredChannel();
     esp_now_register_recv_cb(CommManager::onDataRecv);
+    reliableLink.begin();
+    reliableLink.setReceiveHandler([this](const uint8_t* mac, const uint8_t* payload, size_t len) {
+        return handleFrame(mac, payload, len);
+    });
+    reliableLink.setAckCallback([this](const uint8_t* mac, ReliableProtocol::AckType type, uint8_t status, void* ctx, const char* tag) {
+        handleAck(mac, type, status, ctx, tag);
+    });
+    reliableLink.setEnsurePeerCallback([this](const uint8_t* mac) {
+        ensurePeer(mac);
+    });
+    reliableLink.setSendHook([this](const uint8_t* /*mac*/) {
+        commLedOn();
+        ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
+    });
     // Ensure COMM LED pin is initialized
     pinMode(COMM_OUT_GPIO, OUTPUT);
     // Default off (respect polarity)
@@ -113,7 +136,7 @@ void CommManager::begin() {
 }
 
 void CommManager::loop() {
-    servicePendingTx();
+    reliableLink.loop();
     // Non-blocking COMM LED blink
     if (ledBlinkUntil && millis() > ledBlinkUntil) {
         if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, LOW); else digitalWrite(COMM_OUT_GPIO, HIGH);
@@ -173,6 +196,76 @@ void CommManager::noteRssiFromMac(const uint8_t mac[6], int8_t rssi) {
     }
 }
 
+ReliableProtocol::HandlerResult CommManager::handleFrame(const uint8_t* mac, const uint8_t* payload, size_t len) {
+    ReliableProtocol::HandlerResult result;
+    if (!mac) return result;
+
+    if (len == sizeof(DebugProtocol::Packet) && payload[0] == DebugProtocol::PACKET_MAGIC) {
+        DebugProtocol::Packet packet;
+        memcpy(&packet, payload, sizeof(packet));
+        if (!DebugProtocol::isValid(packet)) {
+            Serial.println("[COMM] Invalid debug packet");
+            result.ack = false;
+            result.status = static_cast<uint8_t>(ReliableProtocol::Status::InvalidLength);
+            return result;
+        }
+        return handleDebugPacket(mac, packet);
+    }
+
+    if (len != sizeof(ProtocolMsg)) {
+        Serial.printf("[COMM] Dropping payload len=%u (expected %u)\n",
+                      static_cast<unsigned>(len), static_cast<unsigned>(sizeof(ProtocolMsg)));
+        result.ack = false;
+        result.status = static_cast<uint8_t>(ReliableProtocol::Status::InvalidLength);
+        return result;
+    }
+
+    ProtocolMsg msg = {};
+    memcpy(&msg, payload, sizeof(msg));
+    ProtocolCmd cmd = static_cast<ProtocolCmd>(msg.cmd);
+    Serial.printf("[COMM] RX %s from %02X:%02X:%02X:%02X:%02X:%02X len=%u\n",
+                  cmdToString(cmd), mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], static_cast<unsigned>(len));
+
+    int8_t rssi = -70; // TODO: capture real RSSI from metadata or sniffer
+    uint8_t reportedChannel = msg.channel;
+    if (reportedChannel < 1 || reportedChannel > 13) {
+        reportedChannel = channelManager.getActiveChannel();
+    }
+
+    if (discovering) {
+        addOrUpdateDiscovered(mac, msg.name, rssi, msg.ton, msg.toff, reportedChannel);
+    }
+
+    if (cmd == ProtocolCmd::STATUS) {
+        if (isDuplicateStatus(mac, msg.ton, msg.toff, msg.outputOverride, millis())) {
+            return result; // already ack success
+        }
+    }
+
+    int idx = deviceManager.findDeviceByMac(mac);
+    if (idx >= 0) {
+        SlaveDevice dev = deviceManager.getDevice(idx);
+        dev.ton = msg.ton;
+        dev.toff = msg.toff;
+        dev.outputState = msg.outputOverride;
+        dev.elapsed = msg.elapsed;
+        dev.rssiRemote = rssi;
+        int8_t rssiTimer = msg.rssiAtTimer;
+        if (rssiTimer > 0) rssiTimer = static_cast<int8_t>(-rssiTimer);
+        if (rssiTimer < 0 && rssiTimer > -120) {
+            dev.rssiSlave = rssiTimer;
+        }
+        if (msg.name[0]) {
+            strncpy(dev.name, msg.name, sizeof(dev.name)-1);
+            dev.name[sizeof(dev.name)-1] = '\0';
+        }
+        dev.lastStatusMs = millis();
+        deviceManager.updateStatus(idx, dev);
+    }
+
+    return result;
+}
+
 void CommManager::sendCommand(const SlaveDevice& dev, uint8_t cmd, const void* payload, size_t payloadSize) {
     ProtocolMsg msg = {};
     msg.cmd = cmd;
@@ -180,94 +273,18 @@ void CommManager::sendCommand(const SlaveDevice& dev, uint8_t cmd, const void* p
         size_t copyLen = std::min(payloadSize, sizeof(ProtocolMsg) - sizeof(msg.cmd));
         memcpy(reinterpret_cast<uint8_t*>(&msg) + sizeof(msg.cmd), payload, copyLen);
     }
-    queueMessage(dev.mac, msg, true);
-}
-
-void CommManager::broadcastDiscovery() {
-    uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-    ProtocolMsg msg = {};
-    msg.cmd = (uint8_t)ProtocolCmd::PAIR;
-    if (!esp_now_is_peer_exist(broadcast)) {
-        esp_now_peer_info_t p = {}; memcpy(p.peer_addr, broadcast, 6); p.channel = 0; p.encrypt = false; esp_now_add_peer(&p);
-        Serial.println("[COMM] Added broadcast peer");
-    }
-    queueMessage(broadcast, msg, false, "DISCOVERY");
-}
-
-void CommManager::processIncoming() {
-    // Called from onDataRecv
-}
-
-void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
-    // Non-blocking COMM LED blink on receive
-    if (instance) {
-        if (Defaults::COMM_LED_ACTIVE_HIGH) digitalWrite(COMM_OUT_GPIO, HIGH); else digitalWrite(COMM_OUT_GPIO, LOW);
-            instance->ledBlinkUntil = millis() + Defaults::COMM_LED_MIN_ON_MS;
-    }
-    // Copy with exact current protocol size (no backward-compat per request)
-    ProtocolMsg msg = {};
-    if (len < (int)sizeof(ProtocolMsg)) { Serial.println("[COMM] Dropping short packet"); return; }
-    memcpy(&msg, data, sizeof(ProtocolMsg));
-    ProtocolCmd cmd = static_cast<ProtocolCmd>(msg.cmd);
-    if (cmd == ProtocolCmd::ACK || cmd == ProtocolCmd::NAK) {
-        if (instance) instance->handleAck(mac, msg);
-        return;
-    }
-    Serial.printf("[COMM] RX %s seq=%u from %02X:%02X:%02X:%02X:%02X:%02X len=%d\n",
-                  cmdToString(cmd), msg.seq, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], len);
-    if (!instance) return;
-    // For now we treat incoming STATUS (and PAIR replies) the same: update discovered or paired device.
-    int8_t rssi = -70; // TODO: Replace with real RSSI if available from RX metadata
-    uint8_t reportedChannel = msg.channel;
-    if (reportedChannel < 1 || reportedChannel > 13) {
-        reportedChannel = instance->channelManager.getActiveChannel();
-    }
-    // If discovering, collect in discovered list
-    if (instance->discovering) {
-        instance->addOrUpdateDiscovered(mac, msg.name, rssi, msg.ton, msg.toff, reportedChannel);
-    }
-    // De-duplicate rapid identical STATUS packets (ton,toff,state) within 150ms
-    if (msg.cmd == (uint8_t)ProtocolCmd::STATUS) {
-        if (instance->isDuplicateStatus(mac, msg.ton, msg.toff, msg.outputOverride, millis())) {
-            // even if duplicate, we could still refresh elapsed if desired; keep simple and drop
-            return;
-        }
-    }
-    // Update existing paired device if present (status fields only, avoid EEPROM write each packet)
-    int idx = instance->deviceManager.findDeviceByMac(mac);
-    if (idx >= 0) {
-        SlaveDevice dev = instance->deviceManager.getDevice(idx);
-        dev.ton = msg.ton;
-        dev.toff = msg.toff;
-    dev.outputState = msg.outputOverride;
-    dev.elapsed = msg.elapsed;
-    // Update RSSI estimates: remote side (placeholder) and timer-provided RSSI
-    dev.rssiRemote = rssi; // TODO: replace with real RX RSSI if available
-    // Normalize timer-side RSSI:
-    // - Some firmwares report magnitude as positive (e.g., 40 for -40 dBm). Interpret >0 as negative.
-    // - Treat 0 and <= -120 as invalid/sentinel.
-    int8_t rssiTimer = msg.rssiAtTimer;
-    if (rssiTimer > 0) rssiTimer = (int8_t)(-rssiTimer);
-    if (rssiTimer < 0 && rssiTimer > -120) {
-        dev.rssiSlave = rssiTimer; // value measured at timer (normalized)
-    }
-    // Reflect name
-    if (msg.name[0]) { strncpy(dev.name, msg.name, sizeof(dev.name)-1); dev.name[sizeof(dev.name)-1] = '\0'; }
-        dev.lastStatusMs = millis();
-        instance->deviceManager.updateStatus(idx, dev);
-    }
+    sendProtocol(dev.mac, msg, cmdToString(static_cast<ProtocolCmd>(cmd)), true, cmdContext(static_cast<ProtocolCmd>(cmd)));
 }
 
 void CommManager::startDiscovery(uint32_t durationMs) {
     discovering = true;
-    if (durationMs == 0) {
-        discoveryEnd = UINT32_MAX; // run continuously until explicitly stopped
-    } else {
-        discoveryEnd = millis() + durationMs;
-    }
+    const uint32_t now = millis();
+    discoveryEnd = durationMs ? (now + durationMs) : UINT32_MAX;
     lastDiscoveryPing = 0;
     discovered.clear();
     discoveryChannels.clear();
+    discoveryChannelUntil = 0;
+
     uint8_t preferred = channelManager.getStoredChannel();
     if (preferred >= 1 && preferred <= 13) {
         discoveryChannels.push_back(preferred);
@@ -277,10 +294,22 @@ void CommManager::startDiscovery(uint32_t durationMs) {
             discoveryChannels.push_back(ch);
         }
     }
+
     discoveryChannelIndex = 0;
     if (!discoveryChannels.empty()) {
         switchDiscoveryChannel(discoveryChannels[0]);
     }
+}
+
+void CommManager::broadcastDiscovery() {
+    static constexpr uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    ProtocolMsg msg = {};
+    msg.cmd = static_cast<uint8_t>(ProtocolCmd::PAIR);
+    msg.channel = channelManager.getStoredChannel();
+    ReliableProtocol::SendConfig cfg;
+    cfg.requireAck = false;
+    cfg.tag = "DISCOVERY";
+    reliableLink.sendStruct(broadcast, msg, cfg);
 }
 
 void CommManager::stopDiscovery() {
@@ -329,13 +358,11 @@ void CommManager::pairWithIndex(int idx) {
     }
     // Temporarily hop to the discovered channel to talk to the timer
     channelManager.applyChannel(d.channel);
-    delay(15);
     // Send a follow-up PAIR (status request) directly to ensure state
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::PAIR;
-    queueMessage(d.mac, msg, true, "PAIR");
+    sendProtocol(d.mac, msg, "PAIR", true, cmdContext(ProtocolCmd::PAIR));
     sendChannelUpdate(d.mac);
-    delay(15);
     channelManager.applyStoredChannel();
     int deviceIdx = deviceManager.findDeviceByMac(d.mac);
     if (deviceIdx >= 0) {
@@ -372,7 +399,7 @@ void CommManager::setActiveName(const char* newName) {
     ProtocolMsg msg={};
     msg.cmd = (uint8_t)ProtocolCmd::SET_NAME;
     strncpy(msg.name, newName, sizeof(msg.name)-1);
-    queueMessage(act->mac, msg, true, "SET_NAME");
+    sendProtocol(act->mac, msg, "SET_NAME", true, cmdContext(ProtocolCmd::SET_NAME));
     // Update local device name immediately for consistent UI reflection
     int idx = deviceManager.getActiveIndex();
     if (idx >= 0) {
@@ -387,7 +414,7 @@ void CommManager::setActiveTimer(float tonSec, float toffSec) {
     msg.cmd = (uint8_t)ProtocolCmd::SET_TIMER;
     msg.ton = tonSec;
     msg.toff = toffSec;
-    queueMessage(act->mac, msg, true, "SET_TIMER");
+    sendProtocol(act->mac, msg, "SET_TIMER", true, cmdContext(ProtocolCmd::SET_TIMER));
     Serial.printf("[COMM] Queue SET_TIMER %.1f/%.1f for %02X:%02X:%02X:%02X:%02X:%02X\n",
                   tonSec, toffSec, act->mac[0],act->mac[1],act->mac[2],act->mac[3],act->mac[4],act->mac[5]);
     requestStatus(*act);
@@ -397,7 +424,7 @@ void CommManager::sendChannelUpdate(const uint8_t mac[6]) {
     ProtocolMsg msg = {};
     msg.cmd = (uint8_t)ProtocolCmd::SET_CHANNEL;
     msg.channel = channelManager.getStoredChannel();
-    queueMessage(mac, msg, true);
+    sendProtocol(mac, msg, "SET_CHANNEL", true, cmdContext(ProtocolCmd::SET_CHANNEL));
 }
 
 void CommManager::switchDiscoveryChannel(uint8_t channel) {
@@ -424,7 +451,6 @@ void CommManager::onChannelChanged(uint8_t previousChannel) {
     for (int i = 0; i < count; ++i) {
         const SlaveDevice& dev = deviceManager.getDevice(i);
         sendChannelUpdate(dev.mac);
-        delay(15);
     }
     channelManager.applyStoredChannel();
     for (int i = 0; i < count; ++i) {
@@ -437,126 +463,92 @@ void CommManager::factoryResetActive() {
     const SlaveDevice* act = deviceManager.getActive(); if (!act) return;
     ProtocolMsg msg={};
     msg.cmd = (uint8_t)ProtocolCmd::FACTORY_RESET;
-    queueMessage(act->mac, msg, true, "FACTORY_RESET");
+    sendProtocol(act->mac, msg, "FACTORY_RESET", true, cmdContext(ProtocolCmd::FACTORY_RESET));
     requestStatus(*act);
 }
 
-uint8_t CommManager::queueMessage(const uint8_t mac[6], ProtocolMsg& msg, bool expectAck, const char* label, uint8_t maxAttemptsOverride) {
-    PendingTx pending = {};
-    memcpy(pending.mac, mac, 6);
-    pending.msg = msg;
-    pending.label = label ? label : cmdToString(static_cast<ProtocolCmd>(msg.cmd));
-    pending.expectAck = expectAck;
-    pending.retryDelayMs = Defaults::COMM_RETRY_INTERVAL_MS ? Defaults::COMM_RETRY_INTERVAL_MS : 200;
-    pending.maxAttempts = maxAttemptsOverride ? maxAttemptsOverride : Defaults::COMM_MAX_RETRIES;
-    pending.attempts = 0;
-    pending.lastSendMs = 0;
-    if (expectAck) {
-        pending.msg.seq = reserveSequence();
-        pendingTx.push_back(pending);
-        PendingTx& stored = pendingTx.back();
-        sendPending(stored);
-        return stored.msg.seq;
-    } else {
-        pending.msg.seq = 0;
-        sendPending(pending);
-        return 0;
+bool CommManager::sendProtocol(const uint8_t* mac, ProtocolMsg& msg, const char* tag, bool requireAck, void* context) {
+    if (!mac) return false;
+    msg.channel = channelManager.getStoredChannel();
+    ReliableProtocol::SendConfig cfg;
+    cfg.requireAck = requireAck;
+    cfg.retryIntervalMs = Defaults::COMM_RETRY_INTERVAL_MS;
+    cfg.maxAttempts = Defaults::COMM_MAX_RETRIES;
+    cfg.tag = tag;
+    cfg.userContext = context;
+    bool queued = reliableLink.sendStruct(mac, msg, cfg);
+    if (!queued) {
+        Serial.printf("[COMM] Failed to queue %s for %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      tag ? tag : cmdToString(static_cast<ProtocolCmd>(msg.cmd)),
+                      mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
     }
+    return queued;
 }
 
-void CommManager::sendPending(PendingTx& tx) {
-    tx.msg.channel = channelManager.getStoredChannel();
-    commLedOn();
-    unsigned long now = millis();
-    ledBlinkUntil = now + Defaults::COMM_LED_MIN_ON_MS;
-    ensurePeer(tx.mac);
-    tx.lastSendMs = now;
-    if (tx.attempts < 0xFF) {
-        tx.attempts++;
+bool CommManager::sendDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet, const ReliableProtocol::SendConfig& cfg) {
+    if (!mac) return false;
+    DebugProtocol::Packet copy = packet;
+    ReliableProtocol::SendConfig config = cfg;
+    if (!config.tag) {
+        config.tag = "DEBUG";
     }
-    esp_err_t r = esp_now_send(tx.mac, reinterpret_cast<uint8_t*>(&tx.msg), sizeof(ProtocolMsg));
-    Serial.printf("[COMM] TX %s seq=%u attempt=%u -> %02X:%02X:%02X:%02X:%02X:%02X (%d)\n",
-                  tx.label ? tx.label : cmdToString(static_cast<ProtocolCmd>(tx.msg.cmd)),
-                  tx.msg.seq,
-                  tx.attempts,
-                  tx.mac[0],tx.mac[1],tx.mac[2],tx.mac[3],tx.mac[4],tx.mac[5],
-                  (int)r);
+    bool queued = reliableLink.sendStruct(mac, copy, config);
+    if (!queued) {
+        Serial.printf("[COMM] Failed to queue DEBUG for %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+    }
+    return queued;
 }
 
-void CommManager::servicePendingTx() {
-    if (pendingTx.empty()) return;
-    unsigned long now = millis();
-    size_t i = 0;
-    while (i < pendingTx.size()) {
-        PendingTx& tx = pendingTx[i];
-        if (!tx.expectAck) {
-            pendingTx.erase(pendingTx.begin() + i);
-            continue;
-        }
-        if (tx.maxAttempts && tx.attempts >= tx.maxAttempts) {
-            Serial.printf("[COMM] Giving up %s seq=%u after %u attempts\n",
-                          tx.label ? tx.label : cmdToString(static_cast<ProtocolCmd>(tx.msg.cmd)),
-                          tx.msg.seq,
-                          tx.attempts);
-            pendingTx.erase(pendingTx.begin() + i);
-            continue;
-        }
-        if (now - tx.lastSendMs >= tx.retryDelayMs) {
-            sendPending(tx);
-        }
-        ++i;
+ReliableProtocol::HandlerResult CommManager::handleDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet) {
+    ReliableProtocol::HandlerResult result;
+    if (debugBridge) {
+        debugBridge->handleTimerPacket(mac, packet);
     }
+    return result;
 }
 
-void CommManager::handleAck(const uint8_t* mac, const ProtocolMsg& msg) {
-    bool success = static_cast<ProtocolCmd>(msg.cmd) == ProtocolCmd::ACK;
-    const char* ackWord = success ? "ACK" : "NAK";
-    uint8_t seq = msg.seq;
-    if (!seq) {
-        Serial.printf("[COMM] %s missing sequence from %02X:%02X:%02X:%02X:%02X:%02X\n",
-                      ackWord, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-        return;
-    }
-    for (size_t i = 0; i < pendingTx.size(); ++i) {
-        PendingTx& tx = pendingTx[i];
-        if (tx.msg.seq == seq && memcmp(tx.mac, mac, 6) == 0) {
-            Serial.printf("[COMM] %s %s seq=%u status=%s after %u attempts from %02X:%02X:%02X:%02X:%02X:%02X\n",
-                          ackWord,
-                          tx.label ? tx.label : cmdToString(static_cast<ProtocolCmd>(tx.msg.cmd)),
-                          seq,
-                          statusToString(static_cast<ProtocolStatus>(msg.status)),
-                          tx.attempts,
+void CommManager::handleAck(const uint8_t* mac, ReliableProtocol::AckType type, uint8_t status, void* context, const char* tag) {
+    const ProtocolCmd cmd = contextToCmd(context);
+    const char* label = tag ? tag : cmdToString(cmd);
+    const char* transportStatus = ReliableProtocol::statusToString(status);
+    const char* protocolStatus = statusToString(static_cast<ProtocolStatus>(status));
+    const char* statusText = transportStatus ? transportStatus : protocolStatus;
+    if (!statusText) statusText = "-";
+
+    switch (type) {
+        case ReliableProtocol::AckType::Ack:
+            Serial.printf("[COMM] ACK %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                          label,
+                          cmdToString(cmd),
+                          status,
+                          statusText,
                           mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-            pendingTx.erase(pendingTx.begin() + i);
-            return;
-        }
+            break;
+        case ReliableProtocol::AckType::Nak:
+            Serial.printf("[COMM] NAK %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                          label,
+                          cmdToString(cmd),
+                          status,
+                          statusText,
+                          mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+            break;
+        case ReliableProtocol::AckType::Timeout:
+            Serial.printf("[COMM] TIMEOUT %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                          label,
+                          cmdToString(cmd),
+                          status,
+                          statusText,
+                          mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+            break;
     }
-    Serial.printf("[COMM] %s seq=%u ref=%s status=%s (no pending match) from %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  ackWord,
-                  seq,
-                  cmdToString(static_cast<ProtocolCmd>(msg.refCmd)),
-                  statusToString(static_cast<ProtocolStatus>(msg.status)),
-                  mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
 }
 
-uint8_t CommManager::reserveSequence() {
-    for (int attempt = 0; attempt < 255; ++attempt) {
-        uint8_t candidate = nextSeq;
-        nextSeq = (nextSeq == 255) ? 1 : static_cast<uint8_t>(nextSeq + 1);
-        if (!sequenceInUse(candidate)) {
-            return candidate;
-        }
-    }
-    // Fallback if every sequence is somehow in use; reuse 1.
-    return 1;
+void CommManager::processIncoming() {
+    reliableLink.loop();
 }
 
-bool CommManager::sequenceInUse(uint8_t seq) const {
-    if (!seq) return true;
-    for (const auto& tx : pendingTx) {
-        if (tx.msg.seq == seq) {
-            return true;
-        }
-    }
-    return false;
+void CommManager::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
+    if (!instance) return;
+    instance->reliableLink.onReceive(mac, data, len);
 }

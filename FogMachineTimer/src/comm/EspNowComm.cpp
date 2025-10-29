@@ -4,9 +4,14 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <EEPROM.h>
+#include <algorithm>
+#include <cstring>
+#include <cstdint>
 
 
 namespace {
+constexpr uint16_t TIMER_EEPROM_SIZE = 256;
 const char* cmdToString(ProtocolCmd cmd) {
     switch (cmd) {
         case ProtocolCmd::PAIR: return "PAIR";
@@ -20,8 +25,6 @@ const char* cmdToString(ProtocolCmd cmd) {
         case ProtocolCmd::TOGGLE_STATE: return "TOGGLE_STATE";
         case ProtocolCmd::FACTORY_RESET: return "FACTORY_RESET";
         case ProtocolCmd::SET_CHANNEL: return "SET_CHANNEL";
-        case ProtocolCmd::ACK: return "ACK";
-        case ProtocolCmd::NAK: return "NAK";
         default: return "UNKNOWN";
     }
 }
@@ -35,6 +38,15 @@ const char* statusToString(ProtocolStatus status) {
         case ProtocolStatus::UNKNOWN_CMD: return "UNKNOWN_CMD";
         default: return "UNSPECIFIED";
     }
+}
+
+void* cmdContext(ProtocolCmd cmd) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(cmd));
+}
+
+ProtocolCmd contextToCmd(void* ctx) {
+    if (!ctx) return ProtocolCmd::STATUS;
+    return static_cast<ProtocolCmd>(reinterpret_cast<uintptr_t>(ctx));
 }
 }
 
@@ -56,12 +68,54 @@ void EspNowComm::begin() {
     }
     channelSettings.apply();
     esp_now_register_recv_cb(EspNowComm::onDataRecv);
+    reliableLink.begin();
+    reliableLink.setReceiveHandler([this](const uint8_t* mac, const uint8_t* payload, size_t len) {
+        return handleFrame(mac, payload, len);
+    });
+    reliableLink.setAckCallback([this](const uint8_t* mac, ReliableProtocol::AckType type, uint8_t status, void* ctx, const char* tag) {
+        ProtocolCmd cmd = contextToCmd(ctx);
+        const char* label = tag ? tag : cmdToString(cmd);
+        const char* transportStatus = ReliableProtocol::statusToString(status);
+        const char* protocolStatus = statusToString(static_cast<ProtocolStatus>(status));
+        const char* statusText = transportStatus ? transportStatus : protocolStatus;
+        if (!statusText) statusText = "-";
+        switch (type) {
+            case ReliableProtocol::AckType::Ack:
+                Serial.printf("[SLAVE] ACK %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                              label,
+                              cmdToString(cmd),
+                              status,
+                              statusText,
+                              mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+                break;
+            case ReliableProtocol::AckType::Nak:
+                Serial.printf("[SLAVE] NAK %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                              label,
+                              cmdToString(cmd),
+                              status,
+                              statusText,
+                              mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+                break;
+            case ReliableProtocol::AckType::Timeout:
+                Serial.printf("[SLAVE] TIMEOUT %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                              label,
+                              cmdToString(cmd),
+                              status,
+                              statusText,
+                              mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+                break;
+        }
+    });
+    reliableLink.setEnsurePeerCallback([this](const uint8_t* mac) {
+        ensurePeer(mac);
+    });
     // Enable promiscuous mode to read RSSI of incoming frames
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(&EspNowComm::wifiSniffer);
 }
 
 void EspNowComm::loop() {
+    reliableLink.loop();
     // Push status to the last known sender when the output state changes
     pushStatusIfStateChanged();
 }
@@ -71,19 +125,11 @@ int8_t EspNowComm::getRssi() const {
 }
 
 void EspNowComm::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
-    if (len < (int)sizeof(ProtocolMsg)) return;
-    ProtocolMsg msg;
-    memcpy(&msg, data, sizeof(msg));
-    Serial.printf("[SLAVE] RX %s seq=%u from %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  cmdToString(static_cast<ProtocolCmd>(msg.cmd)),
-                  msg.seq,
-                  mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-    // Track last sender MAC for associating RSSI from sniffer
-    memcpy(lastSenderMac, mac, 6);
-        if (instance) instance->processCommand(msg, mac);
+    if (!instance) return;
+    instance->reliableLink.onReceive(mac, data, len);
 }
 
-void EspNowComm::sendStatus(const uint8_t* mac, uint8_t seq) {
+void EspNowComm::sendStatus(const uint8_t* mac, bool requireAck) {
     ProtocolMsg reply = {};
     reply.cmd = (uint8_t)ProtocolCmd::STATUS;
     reply.ton = config.getTon();
@@ -95,36 +141,46 @@ void EspNowComm::sendStatus(const uint8_t* mac, uint8_t seq) {
     // Prefer captured RSSI from sniffer for the last sender if available
     reply.rssiAtTimer = lastRxRssi ? lastRxRssi : getRssi();
     reply.channel = channelSettings.getChannel();
-    reply.seq = seq;
-    reply.refCmd = (uint8_t)ProtocolCmd::STATUS;
-    reply.status = (uint8_t)ProtocolStatus::OK;
-    if (!esp_now_is_peer_exist(mac)) {
-        esp_now_peer_info_t p = {}; memcpy(p.peer_addr, mac, 6); p.channel = 0; p.encrypt = false; esp_now_add_peer(&p);
-        Serial.printf("[SLAVE] Added peer for status %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-    }
-    esp_err_t r = esp_now_send(mac, (uint8_t*)&reply, sizeof(reply));
-    Serial.printf("[SLAVE] Sent STATUS seq=%u (%d)\n", reply.seq, (int)r);
+    ReliableProtocol::SendConfig cfg;
+    cfg.requireAck = requireAck;
+    cfg.retryIntervalMs = 200;
+    cfg.maxAttempts = requireAck ? 0 : 1;
+    cfg.tag = "STATUS";
+    cfg.userContext = cmdContext(ProtocolCmd::STATUS);
+    reliableLink.sendStruct(mac, reply, cfg);
 }
 
-void EspNowComm::sendAck(const uint8_t* mac, uint8_t seq, ProtocolCmd refCmd, ProtocolStatus status) {
-    if (!seq) return;
-    ProtocolMsg ack = {};
-    ack.cmd = (status == ProtocolStatus::OK) ? (uint8_t)ProtocolCmd::ACK : (uint8_t)ProtocolCmd::NAK;
-    ack.channel = channelSettings.getChannel();
-    ack.seq = seq;
-    ack.refCmd = static_cast<uint8_t>(refCmd);
-    ack.status = static_cast<uint8_t>(status);
-    if (!esp_now_is_peer_exist(mac)) {
-        esp_now_peer_info_t p = {}; memcpy(p.peer_addr, mac, 6); p.channel = 0; p.encrypt = false; esp_now_add_peer(&p);
-        Serial.printf("[SLAVE] Added peer for ack %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+ReliableProtocol::HandlerResult EspNowComm::handleFrame(const uint8_t* mac, const uint8_t* payload, size_t len) {
+    ReliableProtocol::HandlerResult result;
+    if (!mac) return result;
+
+    if (len == sizeof(DebugProtocol::Packet) && payload[0] == DebugProtocol::PACKET_MAGIC) {
+        DebugProtocol::Packet packet;
+        memcpy(&packet, payload, sizeof(packet));
+        if (!DebugProtocol::isValid(packet)) {
+            Serial.println("[SLAVE] Invalid debug packet");
+            result.ack = false;
+            result.status = static_cast<uint8_t>(ReliableProtocol::Status::InvalidLength);
+            return result;
+        }
+        return handleDebugPacket(mac, packet);
     }
-    esp_err_t r = esp_now_send(mac, (uint8_t*)&ack, sizeof(ack));
-    Serial.printf("[SLAVE] Sent %s seq=%u ref=%s status=%s (%d)\n",
-                  status == ProtocolStatus::OK ? "ACK" : "NAK",
-                  seq,
-                  cmdToString(refCmd),
-                  statusToString(status),
-                  (int)r);
+
+    if (len != sizeof(ProtocolMsg)) {
+        Serial.printf("[SLAVE] Dropping payload len=%u (expected %u)\n",
+                      static_cast<unsigned>(len), static_cast<unsigned>(sizeof(ProtocolMsg)));
+        result.ack = false;
+        result.status = static_cast<uint8_t>(ReliableProtocol::Status::InvalidLength);
+        return result;
+    }
+
+    ProtocolMsg msg = {};
+    memcpy(&msg, payload, sizeof(msg));
+    ProtocolCmd cmd = static_cast<ProtocolCmd>(msg.cmd);
+    Serial.printf("[SLAVE] RX %s from %02X:%02X:%02X:%02X:%02X:%02X len=%u\n",
+                  cmdToString(cmd), mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], static_cast<unsigned>(len));
+    memcpy(lastSenderMac, mac, 6);
+    return processCommand(msg, mac);
 }
 
 // Static sniffer callback to capture RSSI
@@ -140,48 +196,58 @@ void EspNowComm::wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
     }
 }
 
-void EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
-    switch ((ProtocolCmd)msg.cmd) {
+void EspNowComm::ensurePeer(const uint8_t* mac) {
+    if (!mac) return;
+    if (!esp_now_is_peer_exist(mac)) {
+        esp_now_peer_info_t info = {};
+        memcpy(info.peer_addr, mac, 6);
+        info.channel = 0;
+        info.encrypt = false;
+        esp_err_t err = esp_now_add_peer(&info);
+        Serial.printf("[SLAVE] Added peer %02X:%02X:%02X:%02X:%02X:%02X (%d)\n",
+                      mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], static_cast<int>(err));
+    }
+}
+
+ReliableProtocol::HandlerResult EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
+    ReliableProtocol::HandlerResult result;
+    ProtocolCmd cmd = static_cast<ProtocolCmd>(msg.cmd);
+    switch (cmd) {
         case ProtocolCmd::PAIR:
             Serial.println("[SLAVE] PAIR -> sending STATUS");
-            sendAck(mac, msg.seq, ProtocolCmd::PAIR, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::SET_TIMER:
             config.saveTimer(msg.ton, msg.toff);
             timer.setTimes(msg.ton, msg.toff);
-            sendAck(mac, msg.seq, ProtocolCmd::SET_TIMER, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::OVERRIDE_OUTPUT:
             timer.overrideOutput(msg.outputOverride);
-            sendAck(mac, msg.seq, ProtocolCmd::OVERRIDE_OUTPUT, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::RESET_STATE:
             timer.resetState();
-            sendAck(mac, msg.seq, ProtocolCmd::RESET_STATE, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::TOGGLE_STATE:
             timer.toggleAndReset();
-            sendAck(mac, msg.seq, ProtocolCmd::TOGGLE_STATE, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::SET_NAME:
             config.saveName(msg.name);
-            sendAck(mac, msg.seq, ProtocolCmd::SET_NAME, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::SET_CHANNEL:
             if (channelSettings.isChannelSupported(msg.channel)) {
                 if (!channelSettings.setChannel(msg.channel)) {
                     channelSettings.apply();
                 }
-                sendAck(mac, msg.seq, ProtocolCmd::SET_CHANNEL, ProtocolStatus::OK);
-                sendStatus(mac, msg.seq);
+                sendStatus(mac, true);
             } else {
-                sendAck(mac, msg.seq, ProtocolCmd::SET_CHANNEL, ProtocolStatus::INVALID_PARAM);
+                result.ack = false;
+                result.status = static_cast<uint8_t>(ProtocolStatus::INVALID_PARAM);
+                sendStatus(mac, true);
             }
             break;
         case ProtocolCmd::FACTORY_RESET:
@@ -189,17 +255,138 @@ void EspNowComm::processCommand(const ProtocolMsg& msg, const uint8_t* mac) {
             config.factoryReset();
             timer.setTimes(config.getTon(), config.getToff());
             channelSettings.resetToDefault();
-            sendAck(mac, msg.seq, ProtocolCmd::FACTORY_RESET, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         case ProtocolCmd::GET_RSSI:
-            sendAck(mac, msg.seq, ProtocolCmd::GET_RSSI, ProtocolStatus::OK);
-            sendStatus(mac, msg.seq);
+            sendStatus(mac, true);
             break;
         default:
-            sendAck(mac, msg.seq, static_cast<ProtocolCmd>(msg.cmd), ProtocolStatus::UNKNOWN_CMD);
+            result.ack = false;
+            result.status = static_cast<uint8_t>(ProtocolStatus::UNKNOWN_CMD);
             break;
     }
+    return result;
+}
+
+ReliableProtocol::HandlerResult EspNowComm::handleDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet) {
+    ReliableProtocol::HandlerResult result;
+    DebugProtocol::Packet response = packet;
+    response.flags |= static_cast<uint8_t>(DebugProtocol::PacketFlags::Response);
+    response.status = DebugProtocol::Status::Ok;
+
+    switch (packet.command) {
+        case DebugProtocol::Command::Ping:
+            DebugProtocol::clearData(response);
+            break;
+        case DebugProtocol::Command::GetTimerStats: {
+            DebugProtocol::LinkHealth health = {};
+            health.transport = reliableLink.getStats();
+            health.rssiLocal = getRssi();
+            health.rssiPeer = lastRxRssi;
+            DebugProtocol::setData(response, &health, sizeof(health));
+            break;
+        }
+        case DebugProtocol::Command::GetRssi: {
+            struct RssiReport {
+                int8_t timerLocal;
+                int8_t lastRemote;
+                int8_t reserved0;
+                int8_t reserved1;
+            } report{};
+            report.timerLocal = getRssi();
+            report.lastRemote = lastRxRssi;
+            DebugProtocol::setData(response, &report, sizeof(report));
+            break;
+        }
+        case DebugProtocol::Command::SetChannel:
+        case DebugProtocol::Command::ForceChannel: {
+            if (packet.dataLength < 1) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+                break;
+            }
+            uint8_t channel = packet.data[0];
+            if (!channelSettings.isChannelSupported(channel)) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+            } else {
+                if (!channelSettings.setChannel(channel)) {
+                    channelSettings.apply();
+                }
+                DebugProtocol::clearData(response);
+            }
+            break;
+        }
+        case DebugProtocol::Command::ReadConfig: {
+            if (packet.dataLength < 5) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+                break;
+            }
+            uint16_t address = packet.data[1] | (static_cast<uint16_t>(packet.data[2]) << 8);
+            uint16_t length = packet.data[3] | (static_cast<uint16_t>(packet.data[4]) << 8);
+            if (address >= TIMER_EEPROM_SIZE) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+                break;
+            }
+            uint16_t capped = std::min<uint16_t>(length, DebugProtocol::MAX_DATA_BYTES);
+            if (address + capped > TIMER_EEPROM_SIZE) {
+                capped = TIMER_EEPROM_SIZE - address;
+            }
+            uint8_t buffer[DebugProtocol::MAX_DATA_BYTES] = {0};
+            for (uint16_t i = 0; i < capped; ++i) {
+                buffer[i] = EEPROM.read(address + i);
+            }
+            DebugProtocol::setData(response, buffer, capped);
+            break;
+        }
+        case DebugProtocol::Command::WriteConfig: {
+            if (packet.dataLength < 5) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+                break;
+            }
+            uint16_t address = packet.data[1] | (static_cast<uint16_t>(packet.data[2]) << 8);
+            uint16_t length = packet.data[3] | (static_cast<uint16_t>(packet.data[4]) << 8);
+            if (address >= TIMER_EEPROM_SIZE || length + 5 > packet.dataLength) {
+                response.status = DebugProtocol::Status::InvalidArgument;
+                DebugProtocol::clearData(response);
+                break;
+            }
+            uint16_t capped = std::min<uint16_t>(length, static_cast<uint16_t>(packet.dataLength - 5));
+            if (address + capped > TIMER_EEPROM_SIZE) {
+                capped = TIMER_EEPROM_SIZE - address;
+            }
+            const uint8_t* payload = packet.data + 5;
+            for (uint16_t i = 0; i < capped; ++i) {
+                EEPROM.write(address + i, payload[i]);
+            }
+            EEPROM.commit();
+            DebugProtocol::clearData(response);
+            break;
+        }
+        case DebugProtocol::Command::GetDeviceInfo: {
+            DebugProtocol::DeviceInfo info = {};
+            info.firmwareVersion = 0x00010002;
+            info.buildTimestamp = 20251029;
+            info.deviceKind = 1; // timer
+            DebugProtocol::setData(response, &info, sizeof(info));
+            break;
+        }
+        default:
+            response.status = DebugProtocol::Status::Unsupported;
+            DebugProtocol::clearData(response);
+            break;
+    }
+
+    ReliableProtocol::SendConfig cfg;
+    cfg.requireAck = true;
+    cfg.retryIntervalMs = 200;
+    cfg.maxAttempts = 5;
+    cfg.tag = "DEBUG-RSP";
+    reliableLink.sendStruct(mac, response, cfg);
+    return result;
 }
 
 void EspNowComm::pushStatusIfStateChanged() {
@@ -207,22 +394,7 @@ void EspNowComm::pushStatusIfStateChanged() {
     if (instance->timer.consumeStateChanged()) {
         // We don't have the remote MAC here; for simplicity, broadcast the status so the active remote can catch it.
         uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-        ProtocolMsg reply = {};
-        reply.cmd = (uint8_t)ProtocolCmd::STATUS;
-        reply.ton = instance->config.getTon();
-        reply.toff = instance->config.getToff();
-        reply.elapsed = instance->timer.getCurrentStateSeconds();
-        strncpy(reply.name, instance->config.getName(), sizeof(reply.name)-1);
-        reply.outputOverride = instance->timer.isOutputOn();
-        reply.resetState = false;
-        reply.rssiAtTimer = instance->getRssi();
-        reply.channel = instance->channelSettings.getChannel();
-        reply.seq = 0;
-        reply.refCmd = (uint8_t)ProtocolCmd::STATUS;
-        reply.status = (uint8_t)ProtocolStatus::OK;
-        if (!esp_now_is_peer_exist(broadcast)) {
-            esp_now_peer_info_t p = {}; memcpy(p.peer_addr, broadcast, 6); p.channel = 0; p.encrypt = false; esp_now_add_peer(&p);
-        }
-        esp_now_send(broadcast, (uint8_t*)&reply, sizeof(reply));
+        instance->ensurePeer(broadcast);
+        instance->sendStatus(broadcast, false);
     }
 }

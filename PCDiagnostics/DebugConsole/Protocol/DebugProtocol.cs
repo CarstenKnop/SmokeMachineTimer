@@ -1,0 +1,134 @@
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmokeMachineDiagnostics.Protocol;
+
+public static class DebugProtocol
+{
+    public const byte PacketMagic = 0xD1;
+    public const int MaxDataBytes = 96;
+
+    [Flags]
+    public enum PacketFlags : byte
+    {
+        None = 0,
+        Response = 0x01,
+        RequiresTimer = 0x02,
+        Streaming = 0x04
+    }
+
+    public enum Command : byte
+    {
+        Ping = 1,
+        GetRemoteStats = 2,
+        GetTimerStats = 3,
+        SetChannel = 4,
+        ForceChannel = 5,
+        GetRssi = 6,
+        ReadConfig = 7,
+        WriteConfig = 8,
+        GetDeviceInfo = 9,
+        GetLogSnapshot = 10
+    }
+
+    public enum Status : byte
+    {
+        Ok = 0,
+        Busy = 1,
+        InvalidArgument = 2,
+        Unsupported = 3,
+        TransportError = 4,
+        Timeout = 5,
+        NotReady = 6
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct Packet
+    {
+        public byte Magic;
+        public Command Command;
+        public Status Status;
+        public PacketFlags Flags;
+        public ushort RequestId;
+        public ushort DataLength;
+        public fixed byte Data[MaxDataBytes];
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct LinkHealth
+    {
+        public ReliableProtocol.TransportStats Transport;
+        public sbyte RssiLocal;
+        public sbyte RssiPeer;
+        private ushort _reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct DeviceInfo
+    {
+        public uint FirmwareVersion;
+        public uint BuildTimestamp;
+        public byte DeviceKind;
+        private fixed byte Reserved[11];
+    }
+
+    public static Packet CreateRequest(Command command, ReadOnlySpan<byte> payload, ushort requestId)
+    {
+        var packet = new Packet
+        {
+            Magic = PacketMagic,
+            Command = command,
+            Status = Status.Ok,
+            Flags = PacketFlags.None,
+            RequestId = requestId,
+            DataLength = (ushort)Math.Min(payload.Length, MaxDataBytes)
+        };
+        for (int i = 0; i < packet.DataLength; i++)
+        {
+            packet.Data[i] = payload[i];
+        }
+        return packet;
+    }
+
+    public static Packet CreateEmpty(Command command, ushort requestId)
+    {
+        return new Packet
+        {
+            Magic = PacketMagic,
+            Command = command,
+            Status = Status.Ok,
+            Flags = PacketFlags.None,
+            RequestId = requestId,
+            DataLength = 0
+        };
+    }
+
+    public static bool IsValid(in Packet packet) => packet.Magic == PacketMagic && packet.DataLength <= MaxDataBytes;
+
+    public static string DescribeCommand(Command command) => command switch
+    {
+        Command.Ping => "Ping",
+        Command.GetRemoteStats => "GetRemoteStats",
+        Command.GetTimerStats => "GetTimerStats",
+        Command.SetChannel => "SetChannel",
+        Command.ForceChannel => "ForceChannel",
+        Command.GetRssi => "GetRssi",
+        Command.ReadConfig => "ReadConfig",
+        Command.WriteConfig => "WriteConfig",
+        Command.GetDeviceInfo => "GetDeviceInfo",
+        Command.GetLogSnapshot => "GetLogSnapshot",
+        _ => command.ToString()
+    };
+
+    public static string DescribeStatus(Status status) => status switch
+    {
+        Status.Ok => "Ok",
+        Status.Busy => "Busy",
+        Status.InvalidArgument => "InvalidArgument",
+        Status.Unsupported => "Unsupported",
+        Status.TransportError => "TransportError",
+        Status.Timeout => "Timeout",
+        Status.NotReady => "NotReady",
+        _ => status.ToString()
+    };
+}

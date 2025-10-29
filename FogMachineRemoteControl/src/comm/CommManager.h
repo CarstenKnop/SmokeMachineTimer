@@ -5,11 +5,14 @@
 #include "Defaults.h"
 #include "device/DeviceManager.h"
 #include "Pins.h"
+#include "ReliableEspNow.h"
+#include "ReliableProtocol.h"
+#include "DebugProtocol.h"
+#include "protocol/Protocol.h"
 #include <vector>
 
-struct ProtocolMsg;
-
 class RemoteChannelManager;
+class DebugSerialBridge;
 
 class CommManager {
 public:
@@ -20,6 +23,10 @@ public:
     void broadcastDiscovery();
     void processIncoming();
     static void onDataRecv(const uint8_t* mac, const uint8_t* data, int len);
+    void attachDebugBridge(DebugSerialBridge* bridge) { debugBridge = bridge; }
+    bool sendDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet, const ReliableProtocol::SendConfig& cfg = ReliableProtocol::SendConfig{});
+    const ReliableProtocol::TransportStats& getTransportStats() const { return reliableLink.getStats(); }
+    void resetTransportStats() { reliableLink.resetStats(); }
     // Discovery / pairing
     void startDiscovery(uint32_t durationMs = 8000);
     void stopDiscovery();
@@ -61,24 +68,12 @@ private:
     inline void commLedOn()  { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? HIGH : LOW); }
     inline void commLedOff() { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? LOW  : HIGH); }
     void ensurePeer(const uint8_t mac[6]);
-    struct PendingTx {
-        uint8_t mac[6];
-        ProtocolMsg msg;
-        const char* label;
-        bool expectAck;
-        uint32_t lastSendMs;
-        uint32_t retryDelayMs;
-        uint8_t attempts;
-        uint8_t maxAttempts;
-    };
-    std::vector<PendingTx> pendingTx;
-    uint8_t nextSeq = 1;
-    uint8_t queueMessage(const uint8_t mac[6], ProtocolMsg& msg, bool expectAck, const char* label = nullptr, uint8_t maxAttemptsOverride = 0);
-    void sendPending(PendingTx& tx);
-    void servicePendingTx();
-    void handleAck(const uint8_t* mac, const ProtocolMsg& msg);
-    uint8_t reserveSequence();
-    bool sequenceInUse(uint8_t seq) const;
+    ReliableProtocol::HandlerResult handleFrame(const uint8_t* mac, const uint8_t* payload, size_t len);
+    ReliableProtocol::HandlerResult handleDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
+    void handleAck(const uint8_t* mac, ReliableProtocol::AckType type, uint8_t status, void* context, const char* tag);
+    bool sendProtocol(const uint8_t* mac, ProtocolMsg& msg, const char* tag, bool requireAck = true, void* context = nullptr);
+    ReliableEspNow::Link reliableLink;
+    DebugSerialBridge* debugBridge = nullptr;
     // Discovery state
     bool discovering = false;
     uint32_t discoveryEnd = 0;
@@ -100,4 +95,5 @@ private:
     void sendChannelUpdate(const uint8_t mac[6]);
     void switchDiscoveryChannel(uint8_t channel);
     static constexpr unsigned long DISCOVERY_DWELL_MS = 700;
+    friend class DebugSerialBridge;
 };

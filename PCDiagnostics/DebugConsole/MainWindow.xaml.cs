@@ -1,0 +1,249 @@
+using System;
+using System.Collections.Generic;
+using System.IO.Ports;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using SmokeMachineDiagnostics.Protocol;
+using SmokeMachineDiagnostics.Services;
+
+namespace SmokeMachineDiagnostics;
+
+public partial class MainWindow : Window
+{
+    private readonly SerialClient _client = new();
+    private readonly CancellationTokenSource _uiCts = new();
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        _client.PacketReceived += OnPacketReceived;
+        _client.Log += AppendLog;
+        Loaded += (_, _) => RefreshPortList();
+        Closing += (_, _) => { _uiCts.Cancel(); _client.Dispose(); };
+    }
+
+    private void RefreshPorts_OnClick(object sender, RoutedEventArgs e)
+    {
+        RefreshPortList();
+    }
+
+    private void RefreshPortList()
+    {
+        string? selected = PortSelector.SelectedItem as string;
+        PortSelector.ItemsSource = SerialPort.GetPortNames();
+        if (selected != null)
+        {
+            PortSelector.SelectedItem = selected;
+        }
+        UpdateLocalStats();
+    }
+
+    private async void ConnectButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!_client.IsConnected)
+        {
+            string? portName = PortSelector.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(portName))
+            {
+                AppendLog("Select a COM port first.");
+                return;
+            }
+            try
+            {
+                await _client.ConnectAsync(portName, 115200, _uiCts.Token);
+                ConnectButton.Content = "Disconnect";
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Connect failed: {ex.Message}");
+            }
+        }
+        else
+        {
+            _client.Disconnect();
+            ConnectButton.Content = "Connect";
+        }
+        UpdateLocalStats();
+    }
+
+    private async void PingButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ExecuteCommandAsync(DebugProtocol.Command.Ping, ReadOnlySpan<byte>.Empty, "Ping");
+    }
+
+    private async void GetRemoteStatsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ExecuteCommandAsync(DebugProtocol.Command.GetRemoteStats, ReadOnlySpan<byte>.Empty, "GetRemoteStats");
+    }
+
+    private async void GetTimerStatsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ExecuteCommandAsync(DebugProtocol.Command.GetTimerStats, ReadOnlySpan<byte>.Empty, "GetTimerStats");
+    }
+
+    private async void SetChannelButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!byte.TryParse(ChannelInput.Text, out byte channel) || channel < 1 || channel > 13)
+        {
+            AppendLog("Channel must be between 1 and 13.");
+            return;
+        }
+        Span<byte> payload = stackalloc byte[2];
+        payload[0] = channel;
+        payload[1] = InformTimerCheck.IsChecked == true ? (byte)1 : (byte)0;
+        await ExecuteCommandAsync(DebugProtocol.Command.SetChannel, payload, "SetChannel");
+    }
+
+    private async Task ExecuteCommandAsync(DebugProtocol.Command command, ReadOnlySpan<byte> payload, string label)
+    {
+        if (!_client.IsConnected)
+        {
+            AppendLog("Connect the serial client first.");
+            return;
+        }
+        try
+        {
+            byte[] payloadCopy = payload.ToArray();
+            var response = await _client.SendAsync(command, payloadCopy, _uiCts.Token);
+            AppendLog($"{label} -> {DebugProtocol.DescribeStatus(response.Status)} (flags={response.Flags})");
+            ProcessResponse(response);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"{label} failed: {ex.Message}");
+        }
+        UpdateLocalStats();
+    }
+
+    private void ProcessResponse(in DebugProtocol.Packet packet)
+    {
+        if (packet.Status != DebugProtocol.Status.Ok)
+        {
+            AppendLog($"Device status: {DebugProtocol.DescribeStatus(packet.Status)}");
+        }
+
+        switch (packet.Command)
+        {
+            case DebugProtocol.Command.GetRemoteStats:
+                HandleRemoteStats(packet);
+                break;
+            case DebugProtocol.Command.GetTimerStats:
+                HandleTimerStats(packet);
+                break;
+            case DebugProtocol.Command.GetRssi:
+                HandleRssiReport(packet);
+                break;
+            case DebugProtocol.Command.Ping:
+                AppendLog("Ping response received.");
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void OnPacketReceived(DebugProtocol.Packet packet)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (packet.Flags.HasFlag(DebugProtocol.PacketFlags.Streaming))
+            {
+                HandleRemoteStats(packet);
+            }
+            else
+            {
+                AppendLog($"Event: {DebugProtocol.DescribeCommand(packet.Command)}");
+                ProcessResponse(packet);
+            }
+            UpdateLocalStats();
+        });
+    }
+
+    private void HandleRemoteStats(DebugProtocol.Packet packet)
+    {
+        var health = ExtractLinkHealth(packet);
+        if (health.Count > 0)
+        {
+            RemoteTransportStats.Text = FormatStats(health[0].Transport);
+            RemoteTransportStats.Text += $" | RSSI local={health[0].RssiLocal} peer={health[0].RssiPeer}";
+        }
+        if (health.Count > 1)
+        {
+            SerialTransportStats.Text = FormatStats(health[1].Transport);
+            SerialTransportStats.Text += $" | RSSI local={health[1].RssiLocal} peer={health[1].RssiPeer}";
+        }
+    }
+
+    private void HandleTimerStats(DebugProtocol.Packet packet)
+    {
+        var health = ExtractLinkHealth(packet);
+        if (health.Count > 0)
+        {
+            TimerTransportStats.Text = FormatStats(health[0].Transport);
+            TimerRssi.Text = $"Timer RSSI local={health[0].RssiLocal} remote={health[0].RssiPeer}";
+        }
+    }
+
+    private void HandleRssiReport(DebugProtocol.Packet packet)
+    {
+        byte[] payload = CopyPayload(packet);
+        if (payload.Length >= 3)
+        {
+            TimerRssi.Text = $"Remote RSSI local={unchecked((sbyte)payload[0])} timer={unchecked((sbyte)payload[1])} timerLocal={unchecked((sbyte)payload[2])}";
+        }
+    }
+
+    private void UpdateLocalStats()
+    {
+        var stats = _client.Stats;
+        SerialTransportStats.Text = FormatStats(stats);
+    }
+
+    private void AppendLog(string message)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            LogOutput.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+            LogOutput.ScrollToEnd();
+        });
+    }
+
+    private static string FormatStats(ReliableProtocol.TransportStats stats)
+    {
+        return $"TX:{stats.TxFrames} ack:{stats.TxAcked} nak:{stats.TxNak} timeout:{stats.TxTimeout} retries:{stats.TxRetries} err:{stats.TxSendErrors} | RX:{stats.RxFrames} ackReq:{stats.RxAckRequests} ackSent:{stats.RxAckSent} nakSent:{stats.RxNakSent} crc:{stats.RxCrcErrors} invalid:{stats.RxInvalidLength} decl:{stats.HandlerDeclined}";
+    }
+
+    private static List<DebugProtocol.LinkHealth> ExtractLinkHealth(in DebugProtocol.Packet packet)
+    {
+        var list = new List<DebugProtocol.LinkHealth>();
+        int structSize;
+        unsafe
+        {
+            structSize = sizeof(DebugProtocol.LinkHealth);
+        }
+        if (structSize <= 0 || packet.DataLength < structSize) return list;
+        byte[] payload = CopyPayload(packet);
+        for (int offset = 0; offset + structSize <= payload.Length; offset += structSize)
+        {
+            var slice = payload.AsSpan(offset, structSize);
+            var health = MemoryMarshal.Read<DebugProtocol.LinkHealth>(slice);
+            list.Add(health);
+        }
+        return list;
+    }
+
+    private static byte[] CopyPayload(in DebugProtocol.Packet packet)
+    {
+        byte[] data = new byte[packet.DataLength];
+        unsafe
+        {
+            fixed (byte* src = packet.Data)
+            {
+                new ReadOnlySpan<byte>(src, packet.DataLength).CopyTo(data);
+            }
+        }
+        return data;
+    }
+}

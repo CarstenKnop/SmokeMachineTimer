@@ -17,6 +17,7 @@ public:
     float getTon() const;
     float getToff() const;
     float getCurrentStateSeconds() const;
+    bool isOverrideActive() const;
 private:
     uint8_t pin;
     float ton, toff;

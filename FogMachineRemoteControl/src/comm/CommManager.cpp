@@ -467,6 +467,22 @@ void CommManager::factoryResetActive() {
     requestStatus(*act);
 }
 
+void CommManager::renameDeviceByIndex(int idx, const char* newName) {
+    if (idx < 0 || idx >= deviceManager.getDeviceCount() || !newName) {
+        return;
+    }
+    char trimmed[sizeof(SlaveDevice::name)] = {};
+    strncpy(trimmed, newName, sizeof(trimmed) - 1);
+    deviceManager.renameDevice(idx, trimmed);
+    const SlaveDevice& updated = deviceManager.getDevice(idx);
+    ProtocolMsg msg = {};
+    msg.cmd = static_cast<uint8_t>(ProtocolCmd::SET_NAME);
+    strncpy(msg.name, trimmed, sizeof(msg.name) - 1);
+    msg.name[sizeof(msg.name) - 1] = '\0';
+    sendProtocol(updated.mac, msg, "SET_NAME", true, cmdContext(ProtocolCmd::SET_NAME));
+    requestStatus(updated);
+}
+
 bool CommManager::sendProtocol(const uint8_t* mac, ProtocolMsg& msg, const char* tag, bool requireAck, void* context) {
     if (!mac) return false;
     msg.channel = channelManager.getStoredChannel();

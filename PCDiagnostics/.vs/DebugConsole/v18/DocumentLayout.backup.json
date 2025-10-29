@@ -1,0 +1,85 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|x:\\sd\\xiao_esp32c3\\smokemachinetimer\\pcdiagnostics\\debugconsole\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|solutionrelative:debugconsole\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|x:\\sd\\xiao_esp32c3\\smokemachinetimer\\pcdiagnostics\\debugconsole\\protocol\\debugprotocol.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{55421FD6-70FA-ED59-F5A0-EDCE4EE58276}|DebugConsole\\DebugConsole.csproj|solutionrelative:debugconsole\\protocol\\debugprotocol.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 9,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:129:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:130:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:131:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:132:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:135:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:136:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:134:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "DebugProtocol.cs",
+              "DocumentMoniker": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\Protocol\\DebugProtocol.cs",
+              "RelativeDocumentMoniker": "DebugConsole\\Protocol\\DebugProtocol.cs",
+              "ToolTip": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\Protocol\\DebugProtocol.cs",
+              "RelativeToolTip": "DebugConsole\\Protocol\\DebugProtocol.cs",
+              "ViewState": "AgIAANMAAAAAAAAAAIBZwAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-10-29T19:04:35.951Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "DebugConsole\\MainWindow.xaml",
+              "ToolTip": "X:\\sd\\XIAO_ESP32C3\\SmokeMachineTimer\\PCDiagnostics\\DebugConsole\\MainWindow.xaml",
+              "RelativeToolTip": "DebugConsole\\MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2025-10-29T18:57:10.3Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

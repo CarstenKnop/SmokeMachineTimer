@@ -18,7 +18,7 @@ public:
 
     void handleTimerPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
 
-    const DebugProtocol::LinkHealth& getLastTimerHealth() const { return lastTimerHealth; }
+    const DebugProtocol::TimerStatsPayload& getLastTimerStats() const { return lastTimerStats; }
 
 private:
     struct PendingRequest {
@@ -33,7 +33,7 @@ private:
     RemoteChannelManager& channelManager;
     ReliableSerial::Link serialLink;
     std::vector<PendingRequest> pending;
-    DebugProtocol::LinkHealth lastTimerHealth{};
+    DebugProtocol::TimerStatsPayload lastTimerStats{};
     uint16_t nextRequestId = 1;
     bool pcConnected = false;
     uint32_t lastTelemetryMs = 0;
@@ -48,4 +48,5 @@ private:
     PendingRequest& trackPending(uint16_t requestId, const uint8_t* mac, DebugProtocol::Command cmd);
     void completePending(uint16_t requestId);
     uint16_t allocateRequestId();
+    void populateRemoteSnapshot(DebugProtocol::TimerSnapshot& snapshot) const;
 };

@@ -36,7 +36,15 @@ enum class Command : uint8_t {
     ReadConfig = 7,
     WriteConfig = 8,
     GetDeviceInfo = 9,
-    GetLogSnapshot = 10
+    GetLogSnapshot = 10,
+    GetDeviceInventory = 11,
+    SelectDevice = 12,
+    StartDiscovery = 13,
+    StopDiscovery = 14,
+    GetDiscoveredDevices = 15,
+    PairDiscoveredDevice = 16,
+    UnpairDevice = 17,
+    RenameDevice = 18
 };
 
 enum class Status : uint8_t {
@@ -72,7 +80,75 @@ struct LinkHealth {
     ReliableProtocol::TransportStats transport;
     int8_t rssiLocal = 0;    // RSSI observed at device executing the command
     int8_t rssiPeer = 0;     // Last known RSSI of the opposite endpoint (if available)
-    uint8_t reserved[2] = {0};
+    uint8_t channel = 0;     // Current ESP-NOW channel when sampled
+    uint8_t reserved = 0;
+};
+
+struct TimerSnapshot {
+    float tonSeconds = 0.f;
+    float toffSeconds = 0.f;
+    float elapsedSeconds = 0.f;
+    uint8_t outputOn = 0;
+    uint8_t overrideActive = 0;
+    uint8_t channel = 0;
+    uint8_t reserved = 0;
+};
+
+struct TimerStatsPayload {
+    LinkHealth link;
+    TimerSnapshot timer;   // Snapshot reported directly from the timer device
+    TimerSnapshot remote;  // Remote's view of the active timer state (filled by bridge)
+};
+
+struct SerialLinkSummary {
+    uint32_t txFrames = 0;
+    uint32_t rxFrames = 0;
+    uint32_t errors = 0;
+    uint8_t lastStatusCode = 0;
+    uint8_t reserved[3] = {0};
+};
+
+struct RemoteStatsPayload {
+    LinkHealth remoteLink; // ESP-NOW link between remote and timers
+    TimerSnapshot remote;  // Remote-side cached snapshot of the active timer (if any)
+    SerialLinkSummary serialLink; // USB serial debug summary (compact)
+};
+
+struct DeviceInventoryEntry {
+    uint8_t index = 0;
+    uint8_t channel = 0;
+    uint8_t reserved0 = 0;
+    uint8_t reserved1 = 0;
+    uint8_t mac[6] = {0};
+    char name[10] = {0};
+};
+
+struct DeviceInventoryPayload {
+    uint8_t totalCount = 0;
+    uint8_t batchStart = 0;
+    uint8_t batchCount = 0;
+    uint8_t activeIndex = 0xFF;
+    static constexpr uint8_t kMaxEntries = 4;
+    DeviceInventoryEntry entries[kMaxEntries] = {};
+};
+
+struct DiscoveredDeviceEntry {
+    uint8_t discoveryIndex = 0;
+    uint8_t pairedIndex = 0xFF;
+    uint8_t channel = 0;
+    int8_t rssi = 0;
+    uint8_t mac[6] = {0};
+    char timerName[10] = {0};
+    char remoteName[10] = {0};
+};
+
+struct DiscoveredDevicesPayload {
+    uint8_t totalCount = 0;
+    uint8_t batchStart = 0;
+    uint8_t batchCount = 0;
+    uint8_t reserved = 0;
+    static constexpr uint8_t kMaxEntries = 3;
+    DiscoveredDeviceEntry entries[kMaxEntries] = {};
 };
 
 bool isValid(const Packet& packet);

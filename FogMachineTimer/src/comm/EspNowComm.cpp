@@ -279,11 +279,18 @@ ReliableProtocol::HandlerResult EspNowComm::handleDebugPacket(const uint8_t* mac
             DebugProtocol::clearData(response);
             break;
         case DebugProtocol::Command::GetTimerStats: {
-            DebugProtocol::LinkHealth health = {};
-            health.transport = reliableLink.getStats();
-            health.rssiLocal = getRssi();
-            health.rssiPeer = lastRxRssi;
-            DebugProtocol::setData(response, &health, sizeof(health));
+            DebugProtocol::TimerStatsPayload payload = {};
+            payload.link.transport = reliableLink.getStats();
+            payload.link.rssiLocal = getRssi();
+            payload.link.rssiPeer = lastRxRssi;
+            payload.link.channel = channelSettings.getChannel();
+            payload.timer.tonSeconds = config.getTon();
+            payload.timer.toffSeconds = config.getToff();
+            payload.timer.elapsedSeconds = timer.getCurrentStateSeconds();
+            payload.timer.outputOn = timer.isOutputOn() ? 1 : 0;
+            payload.timer.overrideActive = timer.isOverrideActive() ? 1 : 0;
+            payload.timer.channel = channelSettings.getChannel();
+            DebugProtocol::setData(response, &payload, sizeof(payload));
             break;
         }
         case DebugProtocol::Command::GetRssi: {

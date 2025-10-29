@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include <EEPROM.h>
 #include <algorithm>
+#include <cstddef>
+#include <cctype>
 #include <cstring>
 #include "comm/CommManager.h"
 #include "device/DeviceManager.h"
@@ -65,17 +67,22 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
             break;
         }
         case DebugProtocol::Command::GetRemoteStats: {
-            DebugProtocol::LinkHealth health[2] = {};
-            health[0].transport = commManager.getTransportStats();
-            health[0].rssiLocal = WiFi.RSSI();
+            DebugProtocol::RemoteStatsPayload payload = {};
+            payload.remoteLink.transport = commManager.getTransportStats();
+            payload.remoteLink.rssiLocal = WiFi.RSSI();
             const SlaveDevice* active = commManager.getActiveDevice();
-            health[0].rssiPeer = active ? active->rssiSlave : 0;
+            payload.remoteLink.rssiPeer = active ? active->rssiSlave : 0;
+            payload.remoteLink.channel = channelManager.getActiveChannel();
 
-            health[1].transport = serialLink.getStats();
-            health[1].rssiLocal = WiFi.RSSI();
-            health[1].rssiPeer = 0;
+            const auto& serialStats = serialLink.getStats();
+            payload.serialLink.txFrames = serialStats.txFrames;
+            payload.serialLink.rxFrames = serialStats.rxFrames;
+            payload.serialLink.errors = serialStats.txSendErrors + serialStats.rxCrcErrors + serialStats.rxInvalidLength + serialStats.txTimeout + serialStats.txNak;
+            payload.serialLink.lastStatusCode = serialStats.lastStatusCode;
 
-            DebugProtocol::setData(packet, health, sizeof(health));
+            populateRemoteSnapshot(payload.remote);
+
+            DebugProtocol::setData(packet, &payload, sizeof(payload));
             respondToPc(packet, DebugProtocol::Status::Ok);
             break;
         }
@@ -107,12 +114,15 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
                 return;
             }
             uint8_t newChannel = packet.data[0];
-            bool informTimer = packet.data[1] != 0 && packet.command == DebugProtocol::Command::SetChannel;
+            bool informTimer = packet.data[1] != 0;
+            bool persist = (packet.command == DebugProtocol::Command::SetChannel);
             if (!channelManager.isChannelSupported(newChannel)) {
                 respondError(packet, DebugProtocol::Status::InvalidArgument);
                 return;
             }
-            channelManager.storeChannel(newChannel);
+            if (persist) {
+                channelManager.storeChannel(newChannel);
+            }
             channelManager.applyChannel(newChannel);
             if (informTimer) {
                 const SlaveDevice* active = commManager.getActiveDevice();
@@ -244,6 +254,161 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
             respondToPc(packet, DebugProtocol::Status::Ok);
             break;
         }
+        case DebugProtocol::Command::GetDeviceInventory: {
+            uint8_t start = (packet.dataLength >= 1) ? packet.data[0] : 0;
+            int total = deviceManager.getDeviceCount();
+            if (start >= static_cast<uint8_t>(std::max(total, 0))) {
+                start = static_cast<uint8_t>(total);
+            }
+            DebugProtocol::DeviceInventoryPayload payload = {};
+            payload.totalCount = static_cast<uint8_t>(std::min(total, 255));
+            payload.batchStart = start;
+            int activeIdx = deviceManager.getActiveIndex();
+            payload.activeIndex = (activeIdx >= 0) ? static_cast<uint8_t>(activeIdx) : 0xFF;
+            uint8_t batchCount = 0;
+            for (int idx = start; idx < total && batchCount < DebugProtocol::DeviceInventoryPayload::kMaxEntries; ++idx) {
+                const SlaveDevice& dev = deviceManager.getDevice(idx);
+                DebugProtocol::DeviceInventoryEntry& entry = payload.entries[batchCount];
+                entry.index = static_cast<uint8_t>(idx);
+                entry.channel = channelManager.getActiveChannel();
+                memcpy(entry.mac, dev.mac, sizeof(entry.mac));
+                memset(entry.name, 0, sizeof(entry.name));
+                strncpy(entry.name, dev.name, sizeof(entry.name) - 1);
+                batchCount++;
+            }
+            payload.batchCount = batchCount;
+            constexpr size_t headerSize = offsetof(DebugProtocol::DeviceInventoryPayload, entries);
+            size_t payloadSize = headerSize + static_cast<size_t>(batchCount) * sizeof(DebugProtocol::DeviceInventoryEntry);
+            DebugProtocol::setData(packet, &payload, payloadSize);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::SelectDevice: {
+            if (packet.dataLength < 1) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            if (index >= static_cast<uint8_t>(std::max(deviceManager.getDeviceCount(), 0))) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            commManager.activateDeviceByIndex(index);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::StartDiscovery: {
+            uint32_t durationMs = 0;
+            if (packet.dataLength >= 4) {
+                durationMs = static_cast<uint32_t>(packet.data[0]) |
+                              (static_cast<uint32_t>(packet.data[1]) << 8) |
+                              (static_cast<uint32_t>(packet.data[2]) << 16) |
+                              (static_cast<uint32_t>(packet.data[3]) << 24);
+            }
+            commManager.startDiscovery(durationMs);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::StopDiscovery: {
+            commManager.stopDiscovery();
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::GetDiscoveredDevices: {
+            uint8_t start = (packet.dataLength >= 1) ? packet.data[0] : 0;
+            int discoveredCount = commManager.getDiscoveredCount();
+            if (start >= static_cast<uint8_t>(std::max(discoveredCount, 0))) {
+                start = static_cast<uint8_t>(discoveredCount);
+            }
+            DebugProtocol::DiscoveredDevicesPayload payload = {};
+            payload.totalCount = static_cast<uint8_t>(std::min(discoveredCount, 255));
+            payload.batchStart = start;
+            uint8_t batchCount = 0;
+            for (int idx = start; idx < discoveredCount && batchCount < DebugProtocol::DiscoveredDevicesPayload::kMaxEntries; ++idx) {
+                const auto& disc = commManager.discovered[static_cast<size_t>(idx)];
+                DebugProtocol::DiscoveredDeviceEntry& entry = payload.entries[batchCount];
+                entry.discoveryIndex = static_cast<uint8_t>(idx);
+                entry.channel = disc.channel;
+                entry.rssi = disc.rssi;
+                memcpy(entry.mac, disc.mac, sizeof(entry.mac));
+                memset(entry.timerName, 0, sizeof(entry.timerName));
+                strncpy(entry.timerName, disc.name, sizeof(entry.timerName) - 1);
+                int pairedIndex = deviceManager.findDeviceByMac(disc.mac);
+                entry.pairedIndex = pairedIndex >= 0 ? static_cast<uint8_t>(pairedIndex) : 0xFF;
+                if (pairedIndex >= 0) {
+                    const SlaveDevice& dev = deviceManager.getDevice(pairedIndex);
+                    memset(entry.remoteName, 0, sizeof(entry.remoteName));
+                    strncpy(entry.remoteName, dev.name, sizeof(entry.remoteName) - 1);
+                } else {
+                    memset(entry.remoteName, 0, sizeof(entry.remoteName));
+                }
+                batchCount++;
+            }
+            payload.batchCount = batchCount;
+            constexpr size_t headerSize = offsetof(DebugProtocol::DiscoveredDevicesPayload, entries);
+            size_t payloadSize = headerSize + static_cast<size_t>(batchCount) * sizeof(DebugProtocol::DiscoveredDeviceEntry);
+            DebugProtocol::setData(packet, &payload, payloadSize);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::PairDiscoveredDevice: {
+            if (packet.dataLength < 1) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            if (index >= static_cast<uint8_t>(std::max(commManager.getDiscoveredCount(), 0))) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            commManager.pairWithIndex(index);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::UnpairDevice: {
+            if (packet.dataLength < 1) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            if (index >= static_cast<uint8_t>(std::max(deviceManager.getDeviceCount(), 0))) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            commManager.removeDeviceByIndex(index);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
+        case DebugProtocol::Command::RenameDevice: {
+            if (packet.dataLength < 2) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            uint8_t index = packet.data[0];
+            if (index >= static_cast<uint8_t>(std::max(deviceManager.getDeviceCount(), 0))) {
+                respondError(packet, DebugProtocol::Status::InvalidArgument);
+                return;
+            }
+            char nameBuf[sizeof(SlaveDevice::name)] = {};
+            size_t copyLen = std::min<size_t>(packet.dataLength - 1, sizeof(nameBuf) - 1);
+            memcpy(nameBuf, packet.data + 1, copyLen);
+            nameBuf[copyLen] = '\0';
+            // Trim trailing whitespace
+            for (int i = static_cast<int>(copyLen) - 1; i >= 0; --i) {
+                if (nameBuf[i] == '\0') continue;
+                if (std::isspace(static_cast<unsigned char>(nameBuf[i]))) {
+                    nameBuf[i] = '\0';
+                    continue;
+                }
+                break;
+            }
+            if (nameBuf[0] == '\0') {
+                strncpy(nameBuf, "Timer", sizeof(nameBuf) - 1);
+            }
+            commManager.renameDeviceByIndex(index, nameBuf);
+            respondToPc(packet, DebugProtocol::Status::Ok);
+            break;
+        }
         case DebugProtocol::Command::GetLogSnapshot: {
             respondError(packet, DebugProtocol::Status::Unsupported);
             break;
@@ -271,14 +436,20 @@ void DebugSerialBridge::respondError(DebugProtocol::Packet& packet, DebugProtoco
 }
 
 void DebugSerialBridge::handleTimerPacket(const uint8_t* mac, const DebugProtocol::Packet& packet) {
-    if (packet.command == DebugProtocol::Command::GetTimerStats && packet.dataLength >= sizeof(DebugProtocol::LinkHealth)) {
-        memcpy(&lastTimerHealth, packet.data, sizeof(DebugProtocol::LinkHealth));
+    if (packet.command == DebugProtocol::Command::GetTimerStats &&
+        packet.dataLength >= sizeof(DebugProtocol::TimerStatsPayload)) {
+        memcpy(&lastTimerStats, packet.data, sizeof(DebugProtocol::TimerStatsPayload));
+        populateRemoteSnapshot(lastTimerStats.remote);
     }
     if (!pcConnected) {
         return;
     }
     DebugProtocol::Packet forward = packet;
     forward.flags |= static_cast<uint8_t>(DebugProtocol::PacketFlags::Response);
+    if (packet.command == DebugProtocol::Command::GetTimerStats &&
+        packet.dataLength >= sizeof(DebugProtocol::TimerStatsPayload)) {
+        DebugProtocol::setData(forward, &lastTimerStats, sizeof(lastTimerStats));
+    }
     ReliableProtocol::SendConfig cfg;
     cfg.requireAck = true;
     cfg.retryIntervalMs = 100;
@@ -302,15 +473,22 @@ void DebugSerialBridge::sendTelemetry() {
     packet.flags = static_cast<uint8_t>(DebugProtocol::PacketFlags::Response | DebugProtocol::PacketFlags::Streaming);
     packet.status = DebugProtocol::Status::Ok;
 
-    DebugProtocol::LinkHealth health[2] = {};
-    health[0].transport = commManager.getTransportStats();
-    health[0].rssiLocal = WiFi.RSSI();
+    DebugProtocol::RemoteStatsPayload payload = {};
+    payload.remoteLink.transport = commManager.getTransportStats();
+    payload.remoteLink.rssiLocal = WiFi.RSSI();
     const SlaveDevice* active = commManager.getActiveDevice();
-    health[0].rssiPeer = active ? active->rssiSlave : 0;
+    payload.remoteLink.rssiPeer = active ? active->rssiSlave : 0;
+    payload.remoteLink.channel = channelManager.getActiveChannel();
 
-    health[1] = lastTimerHealth;
+    const auto& serialStats = serialLink.getStats();
+    payload.serialLink.txFrames = serialStats.txFrames;
+    payload.serialLink.rxFrames = serialStats.rxFrames;
+    payload.serialLink.errors = serialStats.txSendErrors + serialStats.rxCrcErrors + serialStats.rxInvalidLength + serialStats.txTimeout + serialStats.txNak;
+    payload.serialLink.lastStatusCode = serialStats.lastStatusCode;
 
-    DebugProtocol::setData(packet, health, sizeof(health));
+    populateRemoteSnapshot(payload.remote);
+
+    DebugProtocol::setData(packet, &payload, sizeof(payload));
     ReliableProtocol::SendConfig cfg;
     cfg.requireAck = false;
     cfg.tag = "DEBUG-TELEM";
@@ -374,4 +552,18 @@ uint16_t DebugSerialBridge::allocateRequestId() {
         nextRequestId = 1;
     }
     return nextRequestId;
+}
+
+void DebugSerialBridge::populateRemoteSnapshot(DebugProtocol::TimerSnapshot& snapshot) const {
+    snapshot = {};
+    snapshot.channel = channelManager.getActiveChannel();
+    const SlaveDevice* active = commManager.getActiveDevice();
+    if (!active) {
+        return;
+    }
+    snapshot.tonSeconds = active->ton;
+    snapshot.toffSeconds = active->toff;
+    snapshot.elapsedSeconds = active->elapsed;
+    snapshot.outputOn = active->outputState ? 1 : 0;
+    snapshot.overrideActive = 0;
 }

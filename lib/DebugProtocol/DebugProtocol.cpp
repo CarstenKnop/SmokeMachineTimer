@@ -41,6 +41,14 @@ const char* commandToString(Command cmd) {
         case Command::WriteConfig: return "WriteConfig";
         case Command::GetDeviceInfo: return "GetDeviceInfo";
         case Command::GetLogSnapshot: return "GetLogSnapshot";
+        case Command::GetDeviceInventory: return "GetDeviceInventory";
+        case Command::SelectDevice: return "SelectDevice";
+        case Command::StartDiscovery: return "StartDiscovery";
+        case Command::StopDiscovery: return "StopDiscovery";
+        case Command::GetDiscoveredDevices: return "GetDiscoveredDevices";
+        case Command::PairDiscoveredDevice: return "PairDiscoveredDevice";
+        case Command::UnpairDevice: return "UnpairDevice";
+        case Command::RenameDevice: return "RenameDevice";
         default: return "Unknown";
     }
 }

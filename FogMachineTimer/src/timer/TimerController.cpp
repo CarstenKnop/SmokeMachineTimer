@@ -89,3 +89,7 @@ float TimerController::getCurrentStateSeconds() const {
 bool TimerController::consumeStateChanged() {
     bool v = stateChangedFlag; stateChangedFlag = false; return v;
 }
+
+bool TimerController::isOverrideActive() const {
+    return outputOverride;
+}

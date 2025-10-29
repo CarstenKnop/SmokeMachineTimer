@@ -1,0 +1,53 @@
+﻿<Window x:Class="SmokeMachineDiagnostics.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smoke Machine Diagnostics" Height="600" Width="900">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal">
+            <ComboBox x:Name="PortSelector" Width="180" MinWidth="140" Margin="0,0,8,0"/>
+            <Button x:Name="RefreshPorts" Content="Refresh" Width="80" Click="RefreshPorts_OnClick" Margin="0,0,8,0"/>
+            <Button x:Name="ConnectButton" Content="Connect" Width="90" Click="ConnectButton_OnClick" Margin="0,0,8,0"/>
+            <Separator Width="10" Margin="8,0,8,0"/>
+            <Button x:Name="PingButton" Content="Ping" Width="80" Click="PingButton_OnClick" Margin="0,0,8,0"/>
+            <Button x:Name="GetRemoteStatsButton" Content="Get Remote Stats" Width="140" Click="GetRemoteStatsButton_OnClick" Margin="0,0,8,0"/>
+            <Button x:Name="GetTimerStatsButton" Content="Get Timer Stats" Width="140" Click="GetTimerStatsButton_OnClick" Margin="0,0,8,0"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock VerticalAlignment="Center" Text="Channel:" Margin="0,0,4,0"/>
+                <TextBox x:Name="ChannelInput" Width="50" Text="1" Margin="0,0,4,0"/>
+                <CheckBox x:Name="InformTimerCheck" Content="Inform Timer" IsChecked="True" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <Button x:Name="SetChannelButton" Content="Set Channel" Width="100" Click="SetChannelButton_OnClick"/>
+            </StackPanel>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,16,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <GroupBox Header="Remote" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="Transport" FontWeight="Bold"/>
+                    <TextBlock x:Name="RemoteTransportStats" TextWrapping="Wrap" Margin="0,4,0,8"/>
+                    <TextBlock Text="Serial" FontWeight="Bold"/>
+                    <TextBlock x:Name="SerialTransportStats" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="Timer" Grid.Column="1" Margin="8,0,0,0">
+                <StackPanel>
+                    <TextBlock Text="Transport" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerTransportStats" TextWrapping="Wrap" Margin="0,4,0,8"/>
+                    <TextBlock Text="RSSI" FontWeight="Bold"/>
+                    <TextBlock x:Name="TimerRssi" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <TextBox Grid.Row="2" x:Name="LogOutput" Margin="0" TextWrapping="Wrap" IsReadOnly="True" VerticalScrollBarVisibility="Auto"/>
+    </Grid>
+</Window>

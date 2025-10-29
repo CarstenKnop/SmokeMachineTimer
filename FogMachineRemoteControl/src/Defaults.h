@@ -13,6 +13,9 @@
 #include <stdint.h>
 
 namespace Defaults {
+  // Preferred ESP-NOW channel when no user selection is stored.
+  static constexpr uint8_t DEFAULT_CHANNEL = 1;
+
   // Display rotation: 0,1,2,3 => 0/90/180/270 degrees
   static constexpr uint8_t OLED_ROTATION = 0;
 
@@ -64,6 +67,9 @@ namespace Defaults {
   static constexpr unsigned long COMM_LED_MIN_ON_MS = 2; // make this longer (e.g., 120) if still not visible
   // COMM LED polarity (true = active HIGH, false = active LOW)
   static constexpr bool COMM_LED_ACTIVE_HIGH = true;
+  // ESP-NOW command retry policy (0 retries => infinite until ACK/NAK)
+  static constexpr unsigned long COMM_RETRY_INTERVAL_MS = 200;
+  static constexpr uint8_t COMM_MAX_RETRIES = 0;
 
   // UI layout (remote)
   // Timer rows and digits

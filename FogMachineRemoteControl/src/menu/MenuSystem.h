@@ -3,6 +3,7 @@
 #pragma once
 #include <Arduino.h>
 #include <vector>
+#include "Defaults.h"
 
 struct MenuItem {
     const char* label;
@@ -32,7 +33,12 @@ public:
     bool justSelected() const { return lastSelectTime && (millis() - lastSelectTime < 400); }
     const char* getLastActionLabel() const { return lastActionLabel; }
     // Editing helpers / modes
-    enum class Mode { ROOT, EDIT_BLANKING, EDIT_TXPOWER, EDIT_BRIGHTNESS, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_RSSI_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM };
+    enum class Mode { ROOT, EDIT_BLANKING, EDIT_TXPOWER, EDIT_BRIGHTNESS, PAIRING, MANAGE_DEVICES, RENAME_DEVICE, SELECT_ACTIVE, SHOW_RSSI, BATTERY_CALIB, EDIT_RSSI_CALIB, EDIT_TIMERS, EDIT_NAME, CONFIRM, CHANNEL_SETTINGS };
+    struct ChannelOption {
+        uint8_t channel;
+        uint16_t apCount;
+        uint32_t sumAbsRssi;
+    };
     enum class ConfirmAction { NONE, RESET_SLAVE, RESET_REMOTE, POWER_CYCLE };
     bool isEditing() const { return mode != Mode::ROOT; }
     bool isEditingBlanking() const { return mode == Mode::EDIT_BLANKING; }
@@ -62,6 +68,7 @@ public:
     bool batteryCalActive() const { return mode == Mode::BATTERY_CALIB && calibInProgress; }
     bool editingTimers() const { return mode == Mode::EDIT_TIMERS; }
     bool editingName() const { return mode == Mode::EDIT_NAME; }
+    bool editingChannels() const { return mode == Mode::CHANNEL_SETTINGS; }
     // RSSI list scroll state
     int getRssiFirst() const { return rssiFirstIndex; }
     void setRssiFirst(int v) { rssiFirstIndex = v; }
@@ -142,6 +149,7 @@ public:
     void enterBatteryCal();
     void enterRssiCalib();
     void enterEditTimers(float tonSecInit, float toffSecInit);
+    void enterChannelSettings();
     // Battery calibration helpers (UI state only)
     void initBatteryCal(uint16_t a0, uint16_t a50, uint16_t a100) { editCalib[0]=a0; editCalib[1]=a50; editCalib[2]=a100; calibInitialized=true; editCalibIndex=0; }
     bool consumeCalibSave(uint16_t out[3]) { if (!calibSavePending) return false; calibSavePending=false; out[0]=editCalib[0]; out[1]=editCalib[1]; out[2]=editCalib[2]; return true; }
@@ -155,6 +163,16 @@ public:
     bool consumeTxPowerSave(int8_t &outQdbm) { if (!txSavePending) return false; txSavePending=false; outQdbm = editTxPowerQdbm; return true; }
     bool consumeBrightnessSave(uint8_t &outLvl) { if (!brightSavePending) return false; brightSavePending=false; outLvl = editOledBrightness; return true; }
     bool consumeRssiCalibSave(int8_t &outLow, int8_t &outHigh) { if (!rssiSavePending) return false; rssiSavePending=false; outLow = appliedRssiLowDbm; outHigh = appliedRssiHighDbm; return true; }
+    bool consumeChannelSave(uint8_t &outChannel) { if (!channelSavePending) return false; channelSavePending = false; outChannel = channelSaveValue; channelCurrent = channelSaveValue; return true; }
+    bool consumeChannelScanRequest() { if (!channelScanPending) return false; channelScanPending = false; return true; }
+    void setChannelScanResult(const std::vector<ChannelOption>& options, uint8_t currentChannel);
+    void setChannelScanFailed();
+    bool isChannelScanActive() const { return channelScanActive; }
+    bool isChannelScanFailed() const { return channelScanFailed; }
+    int getChannelSelection() const { return channelSelection; }
+    int getChannelOptionCount() const { return (int)channelOptions.size(); }
+    const ChannelOption& getChannelOption(int index) const { return channelOptions[index]; }
+    uint8_t getChannelCurrent() const { return channelCurrent; }
     // WiFi TX power (qdbm, 0.25 dBm units)
     int8_t editTxPowerQdbm = 84;
     int8_t appliedTxPowerQdbm = 84;
@@ -175,6 +193,15 @@ public:
     unsigned long rssiHoldStartUp = 0;
     unsigned long rssiHoldStartDown = 0;
     unsigned long rssiLastRepeatMs = 0;
+    // Channel selection state
+    std::vector<ChannelOption> channelOptions;
+    bool channelScanPending = false;
+    bool channelScanActive = false;
+    bool channelScanFailed = false;
+    int channelSelection = 0;
+    uint8_t channelCurrent = Defaults::DEFAULT_CHANNEL;
+    bool channelSavePending = false;
+    uint8_t channelSaveValue = Defaults::DEFAULT_CHANNEL;
     int findBlankingIndexFor(int seconds) const;
     void clampScroll();
     // --- Edit timers state ---

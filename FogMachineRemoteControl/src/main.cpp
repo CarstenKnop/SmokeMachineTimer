@@ -3,6 +3,7 @@
 #include "Pins.h"
 #include <EEPROM.h>
 #include "Defaults.h"
+#include <vector>
 
 // main.cpp
 // Entry point for FogMachineRemoteControl (master). Sets up UI, device management, comms, battery, and menu system.
@@ -17,6 +18,7 @@
 #include "calibration/CalibrationManager.h"
 #include "protocol/Protocol.h"
 #include "core/RemoteConfig.h"
+#include "channel/RemoteChannelManager.h"
 #include <esp_wifi.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
@@ -32,9 +34,17 @@ MenuSystem menu;
 DeviceManager deviceMgr;
 CalibrationManager calibMgr;
 BatteryMonitor battery(BAT_ADC_PIN, calibMgr);
-CommManager comm(deviceMgr);
+RemoteChannelManager channelMgr;
+CommManager comm(deviceMgr, channelMgr);
 InputInterpreter inputInterp;
 RemoteConfig rconfig;
+
+static void wipeRemoteEeprom() {
+  for (int i = 0; i < 512; ++i) {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.commit();
+}
 
 void setup() {
   // Ensure RTC IO holds are released on boot so pins can be configured normally
@@ -85,6 +95,8 @@ void setup() {
   displayMgr.drawBootStatus("Boot: menu OK");
   EEPROM.begin(512); // ensure EEPROM is available for DeviceManager persistence
   displayMgr.drawBootStatus("Boot: EEPROM OK");
+  channelMgr.begin(&wipeRemoteEeprom, 512);
+  displayMgr.drawBootStatus("Boot: channel OK");
   deviceMgr.begin();
   displayMgr.drawBootStatus("Boot: devices OK");
   rconfig.begin(512);
@@ -187,6 +199,37 @@ void loop() {
   }
 
   menu.update(buttons.upPressed(), buttons.downPressed(), buttons.hashPressed(), buttons.hashLongPressed(), buttons.starPressed(), buttons.upHeld(), buttons.downHeld());
+  if (menu.consumeChannelScanRequest()) {
+    if (!channelMgr.requestSurvey()) {
+      menu.setChannelScanFailed();
+    }
+  }
+  if (channelMgr.getSurveyState() == RemoteChannelManager::SurveyState::Running) {
+    if (channelMgr.pollSurvey()) {
+      if (channelMgr.getSurveyState() == RemoteChannelManager::SurveyState::Complete) {
+        std::vector<MenuSystem::ChannelOption> options;
+        const auto &candidates = channelMgr.getCandidates();
+        options.reserve(candidates.size());
+        for (const auto &cand : candidates) {
+          MenuSystem::ChannelOption opt{cand.channel, cand.apCount, cand.sumAbsRssi};
+          options.push_back(opt);
+        }
+        menu.setChannelScanResult(options, channelMgr.getStoredChannel());
+      } else {
+        menu.setChannelScanFailed();
+      }
+      channelMgr.clearSurvey();
+    }
+  }
+  uint8_t pendingChannel = 0;
+  if (menu.consumeChannelSave(pendingChannel)) {
+    uint8_t previousChannel = channelMgr.getActiveChannel();
+    if (channelMgr.storeChannel(pendingChannel)) {
+      comm.onChannelChanged(previousChannel);
+    } else {
+      channelMgr.applyStoredChannel();
+    }
+  }
   // If menu just closed, ensure a new long-press requires a fresh leading edge
   if (prevInMenu && !menu.isInMenu()) {
     inputInterp.resetOnMenuExit(menu.getMenuExitTime());

@@ -70,6 +70,29 @@ All communications use a standardized struct to ensure consistency between the r
 - For many slaves in the environment, push traffic is bounded because only the selected/active device typically changes frequently; background devices send rare updates (at state transitions).
 - The remote de-duplicates rapid identical STATUS packets within a short window (e.g., 150 ms) to avoid display thrash.
 
+4.4. Channel Management
+The remote owns the active ESP-NOW channel for the system. A dedicated Channel Settings menu covers persistence, scanning, and synchronization.
+
+Responsibilities:
+
+- Persist the selected channel in EEPROM with validation on boot (magic + version guards). Invalid or unsupported entries trigger a factory reset of the channel storage segment.
+- Apply the stored channel to the Wi-Fi/ESP-NOW radio after any temporary scan completes.
+- Provide a channel survey that asynchronously scans 2.4 GHz channels 1–13, ranks them by AP count and aggregate RSSI, and exposes the ordered list to the UI. The survey parks the radio back on the stored channel when finished.
+- Minimise flash wear: do not rewrite EEPROM if the chosen channel already matches the stored value.
+- Notify CommManager when the stored channel changes so that discovery, pairing, and existing peers hop immediately.
+
+UI requirements:
+
+- Channel Settings menu displays the current stored/active channel, scan status, and ranked survey results (channel, network count, aggregate signal).
+- User can trigger a scan, select a candidate, and commit. Saving updates EEPROM, reapplies the channel, and emits a protocol update to connected timers.
+- While a scan is running the menu reflects the in-progress state; cancelling clears interim results.
+
+4.5. Discovery Channel Sweep
+Discovery/pairing now sweeps through all supported channels until a timer responds. CommManager schedules timed hops (e.g., every few hundred milliseconds) across channels 1–13 during discovery to locate timers that were left on another channel. On success, discovery locks back to the stored channel. RemoteChannelManager keeps the stored channel authoritative so subsequent operations stay consistent.
+
+4.6. Channel Sync Messaging
+Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sends `SET_CHANNEL` to the target timer so both sides remain on the same channel. Timers acknowledge by switching channels and replying with STATUS.
+
 5. Pairing and Device Management
 The remote will feature a user-friendly system for discovering, pairing, and managing slave devices.
 
@@ -78,13 +101,10 @@ Initiation (Remote): The user will navigate to a "Pair New Device" option in the
 
 Discovery (Remote):
 
-The remote broadcasts a special "discovery" message to the universal broadcast address (FF:FF:FF:FF:FF:FF).
+- Remote sweeps through all supported channels (1–13) during discovery. It transmits the broadcast discovery frame on the current sweep channel, listens briefly, then advances to the next channel until responses arrive or the sweep times out.
+- Responses are recorded with RSSI and the channel they were heard on. When the user completes pairing, the remote immediately sends `SET_CHANNEL` with the currently stored channel so the new timer hops to the remote's channel.
 
-It enters a listening state for 10-15 seconds, collecting responses.
-
-For each response, it records the slave's MAC address and the RSSI (signal strength).
-
-Discovery Response (Slave): Slaves must have a "pairing mode" (e.g., triggered on first boot or by a button press) where they listen for the discovery broadcast and reply directly to the remote with their MAC address.
+Discovery Response (Slave): Slaves listen on their configured ESP-NOW channel (persisted in EEPROM). Upon receiving the broadcast discovery request they respond directly to the remote. Timers without valid channel information fall back to the default channel before responding.
 
 5.2. Pairing UI
 After scanning, the remote will display a list of all discovered, available slave devices on the OLED screen.

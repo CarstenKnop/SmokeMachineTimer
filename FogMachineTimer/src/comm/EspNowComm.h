@@ -5,11 +5,12 @@
 #include "protocol/Protocol.h"
 #include "timer/TimerController.h"
 #include "config/DeviceConfig.h"
+#include "config/TimerChannelSettings.h"
 #include <esp_wifi_types.h>
 
 class EspNowComm {
 public:
-    EspNowComm(TimerController& timer, DeviceConfig& config);
+    EspNowComm(TimerController& timer, DeviceConfig& config, TimerChannelSettings& channelSettings);
     void begin();
     void loop();
     void pushStatusIfStateChanged();
@@ -18,7 +19,9 @@ public:
 private:
     TimerController& timer;
     DeviceConfig& config;
-    void sendStatus(const uint8_t* mac);
+    TimerChannelSettings& channelSettings;
+    void sendStatus(const uint8_t* mac, uint8_t seq = 0);
+    void sendAck(const uint8_t* mac, uint8_t seq, ProtocolCmd refCmd, ProtocolStatus status);
     void processCommand(const ProtocolMsg& msg, const uint8_t* mac);
     static EspNowComm* instance;
     // RSSI capture via promiscuous callback

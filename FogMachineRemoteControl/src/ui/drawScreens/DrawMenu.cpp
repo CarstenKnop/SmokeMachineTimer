@@ -100,6 +100,51 @@ void DisplayManager::drawMenu(const MenuSystem& menu, const DeviceManager& devic
         }
         display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
         display.setCursor(0,54); display.println("#=Activate  #L=Del *=Back"); return;
+    } else if (menu.getMode() == MenuSystem::Mode::CHANNEL_SETTINGS) {
+        display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Channel Select"); display.drawLine(0,9,127,9,SSD1306_WHITE);
+        if (menu.isChannelScanActive()) {
+            display.setCursor(0,18); display.println("Scanning...");
+            display.setCursor(0,30); display.println("*=Back");
+            return;
+        }
+        if (menu.isChannelScanFailed()) {
+            display.setCursor(0,18); display.println("Scan failed");
+            display.setCursor(0,30); display.println("#=Retry *=Back");
+            return;
+        }
+        int count = menu.getChannelOptionCount();
+        if (count == 0) {
+            display.setCursor(0,18); display.println("No data");
+            display.setCursor(0,30); display.println("#=Retry *=Back");
+            return;
+        }
+        int sel = menu.getChannelSelection();
+        if (sel >= count) sel = count - 1;
+        if (sel < 0) sel = 0;
+        int first = 0;
+        if (sel >= 4) first = sel - 3;
+        for (int i = 0; i < 4 && (first + i) < count; ++i) {
+            int idx = first + i;
+            const auto &opt = menu.getChannelOption(idx);
+            bool highlight = (idx == sel);
+            bool isCurrent = (opt.channel == menu.getChannelCurrent());
+            int y = 12 + i * 12;
+            if (highlight) {
+                display.fillRect(0, y, 128, 10, SSD1306_WHITE);
+                display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+            } else {
+                display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            }
+            display.setCursor(2, y);
+            uint32_t avg = opt.apCount ? (opt.sumAbsRssi / opt.apCount) : 0;
+            char line[32];
+            snprintf(line, sizeof(line), "%cCh%02u  AP:%u  Avg:%lu", isCurrent ? '*' : ' ', opt.channel, (unsigned)opt.apCount, (unsigned long)avg);
+            display.print(line);
+        }
+        display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+        display.setCursor(0,54);
+        display.println("#=Use  #L=Rescan  *=Back");
+        return;
     } else if (menu.getMode() == MenuSystem::Mode::RENAME_DEVICE) {
         display.setCursor(0,0); display.setTextColor(SSD1306_WHITE); display.println("Rename Device"); display.drawLine(0,9,127,9,SSD1306_WHITE);
         if (!menu.renameEditing()) {

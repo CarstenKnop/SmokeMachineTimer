@@ -19,6 +19,7 @@ MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), sc
         {"OLED Brightness"},
         {"WiFi TX Power"},
         {"Show RSSI"},
+        {"Channel Settings"},
         {"RSSI Calibration"},
         {"Battery Calibration"},
         {"Reset Timer"},
@@ -83,6 +84,8 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
                 enterRssiCalib();
             } else if (strcmp(label, "Show RSSI") == 0) {
                 enterShowRssi();
+            } else if (strcmp(label, "Channel Settings") == 0) {
+                enterChannelSettings();
             } else if (strcmp(label, "Battery Calibration") == 0) {
                 enterBatteryCal();
             } else if (strcmp(label, "Reset Timer") == 0) {
@@ -159,6 +162,40 @@ void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool
             return;
         }
         if (starPressed) { mode = Mode::ROOT; return; }
+    } else if (mode == Mode::CHANNEL_SETTINGS) {
+        auto startRescan = [&]() {
+            channelOptions.clear();
+            channelSelection = 0;
+            channelScanActive = true;
+            channelScanPending = true;
+            channelScanFailed = false;
+        };
+        if (channelScanActive) {
+            if (starPressed) {
+                channelScanActive = false;
+                channelScanPending = false;
+                channelScanFailed = false;
+                mode = Mode::ROOT;
+            }
+            return;
+        }
+        if ((channelOptions.empty() && hashPressed) || (hashLongPressed && !hashPressed)) {
+            startRescan();
+            return;
+        }
+        if (channelOptions.empty()) {
+            if (starPressed) { mode = Mode::ROOT; return; }
+            return;
+        }
+        if (hashPressed) {
+            channelSavePending = true;
+            channelSaveValue = channelOptions[channelSelection].channel;
+            mode = Mode::ROOT;
+            return;
+        }
+        if (starPressed) { mode = Mode::ROOT; return; }
+        if (upPressed && channelSelection > 0) channelSelection--;
+        if (downPressed && channelSelection < (int)channelOptions.size() - 1) channelSelection++;
     } else if (mode == Mode::MANAGE_DEVICES) {
         // Manage Devices: Up/Down navigate paired device list
         auto *comm = CommManager::get();
@@ -533,6 +570,15 @@ void MenuSystem::enterShowRssi() {
     mode = Mode::SHOW_RSSI;
     if (auto *comm = CommManager::get()) comm->requestStatusActive();
 }
+void MenuSystem::enterChannelSettings() {
+    inMenu = true;
+    mode = Mode::CHANNEL_SETTINGS;
+    channelOptions.clear();
+    channelSelection = 0;
+    channelScanFailed = false;
+    channelScanActive = true;
+    channelScanPending = true;
+}
 void MenuSystem::enterBatteryCal() { mode = Mode::BATTERY_CALIB; calibInProgress = false; }
 void MenuSystem::enterRssiCalib() {
     inMenu = true;
@@ -561,4 +607,31 @@ void MenuSystem::enterBrightness() {
     mode = Mode::EDIT_BRIGHTNESS;
     // Seed edit value from applied so the UI starts at the current setting
     editOledBrightness = appliedOledBrightness;
+}
+
+void MenuSystem::setChannelScanResult(const std::vector<ChannelOption>& options, uint8_t currentChannel) {
+    channelOptions = options;
+    channelScanActive = false;
+    channelScanFailed = options.empty();
+    channelCurrent = currentChannel;
+    if (channelOptions.empty()) {
+        channelSelection = 0;
+        return;
+    }
+    channelSelection = 0;
+    for (size_t i = 0; i < channelOptions.size(); ++i) {
+        if (channelOptions[i].channel == currentChannel) {
+            channelSelection = static_cast<int>(i);
+            break;
+        }
+    }
+    if (channelSelection >= (int)channelOptions.size()) {
+        channelSelection = (int)channelOptions.size() - 1;
+    }
+}
+
+void MenuSystem::setChannelScanFailed() {
+    channelOptions.clear();
+    channelScanActive = false;
+    channelScanFailed = true;
 }

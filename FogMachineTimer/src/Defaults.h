@@ -10,6 +10,7 @@
 #pragma once
 
 namespace Defaults {
+	static constexpr uint8_t DEFAULT_CHANNEL = 1;
 	// Hardware Pins (ESP32-C3 Seeed XIAO) - replicate for symmetry; adjust if hardware diverges
 	static constexpr int RELAY_PIN = 2;
 	static constexpr int BTN_UP = 3;

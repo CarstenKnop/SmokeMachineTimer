@@ -7,9 +7,13 @@
 #include "Pins.h"
 #include <vector>
 
+struct ProtocolMsg;
+
+class RemoteChannelManager;
+
 class CommManager {
 public:
-    CommManager(DeviceManager& deviceMgr);
+    CommManager(DeviceManager& deviceMgr, RemoteChannelManager& channelMgr);
     void begin();
     void loop();
     void sendCommand(const SlaveDevice& dev, uint8_t cmd, const void* payload, size_t payloadSize);
@@ -21,7 +25,7 @@ public:
     void stopDiscovery();
     bool isDiscovering() const { return discovering; }
     uint32_t discoveryMsLeft() const { return (discovering && millis() < discoveryEnd) ? (discoveryEnd - millis()) : 0; }
-    struct DiscoveredDevice { uint8_t mac[6]; char name[10]; int8_t rssi; float ton; float toff; unsigned long lastSeen; };
+    struct DiscoveredDevice { uint8_t mac[6]; char name[10]; int8_t rssi; float ton; float toff; unsigned long lastSeen; uint8_t channel; };
     int getDiscoveredCount() const { return (int)discovered.size(); }
     const DiscoveredDevice& getDiscovered(int idx) const { return discovered[idx]; }
     void pairWithIndex(int idx);
@@ -35,6 +39,7 @@ public:
     void setActiveName(const char* newName);
     void setActiveTimer(float tonSec, float toffSec);
     void factoryResetActive();
+    void onChannelChanged(uint8_t previousChannel);
     // Device management helpers
     const SlaveDevice* getActiveDevice() const { return deviceManager.getActive(); }
     int getPairedCount() const { return deviceManager.getDeviceCount(); }
@@ -49,18 +54,40 @@ public:
     void setRssiSnifferEnabled(bool enable);
 private:
     DeviceManager& deviceManager;
+    RemoteChannelManager& channelManager;
     static CommManager* instance;
     unsigned long ledBlinkUntil = 0;
     // LED helpers respecting polarity
     inline void commLedOn()  { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? HIGH : LOW); }
     inline void commLedOff() { digitalWrite(COMM_OUT_GPIO, Defaults::COMM_LED_ACTIVE_HIGH ? LOW  : HIGH); }
     void ensurePeer(const uint8_t mac[6]);
+    struct PendingTx {
+        uint8_t mac[6];
+        ProtocolMsg msg;
+        const char* label;
+        bool expectAck;
+        uint32_t lastSendMs;
+        uint32_t retryDelayMs;
+        uint8_t attempts;
+        uint8_t maxAttempts;
+    };
+    std::vector<PendingTx> pendingTx;
+    uint8_t nextSeq = 1;
+    uint8_t queueMessage(const uint8_t mac[6], ProtocolMsg& msg, bool expectAck, const char* label = nullptr, uint8_t maxAttemptsOverride = 0);
+    void sendPending(PendingTx& tx);
+    void servicePendingTx();
+    void handleAck(const uint8_t* mac, const ProtocolMsg& msg);
+    uint8_t reserveSequence();
+    bool sequenceInUse(uint8_t seq) const;
     // Discovery state
     bool discovering = false;
     uint32_t discoveryEnd = 0;
     uint32_t lastDiscoveryPing = 0;
     std::vector<DiscoveredDevice> discovered;
-    void addOrUpdateDiscovered(const uint8_t mac[6], const char* name, int8_t rssi, float ton, float toff);
+    std::vector<uint8_t> discoveryChannels;
+    size_t discoveryChannelIndex = 0;
+    unsigned long discoveryChannelUntil = 0;
+    void addOrUpdateDiscovered(const uint8_t mac[6], const char* name, int8_t rssi, float ton, float toff, uint8_t channel);
     void finishDiscovery();
     // Status de-dup cache (per MAC tail match)
     struct LastStatusCache { uint8_t mac[6]; float ton; float toff; bool state; unsigned long ts; };
@@ -70,4 +97,7 @@ private:
     bool snifferEnabled = false;
     static void wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type);
     void noteRssiFromMac(const uint8_t mac[6], int8_t rssi);
+    void sendChannelUpdate(const uint8_t mac[6]);
+    void switchDiscoveryChannel(uint8_t channel);
+    static constexpr unsigned long DISCOVERY_DWELL_MS = 700;
 };

@@ -125,20 +125,21 @@ void DebugSerialBridge::handlePcPacket(DebugProtocol::Packet& packet) {
             bool channelChanged = (previousChannel != newChannel);
 
             if (informTimer && channelChanged) {
-                if (const SlaveDevice* active = commManager.getActiveDevice()) {
-                    ProtocolMsg update = {};
-                    update.cmd = static_cast<uint8_t>(ProtocolCmd::SET_CHANNEL);
-                    update.channel = newChannel;
-                    commManager.sendProtocol(active->mac, update, "DEBUG-SET_CHANNEL", true, nullptr);
+                if (!queueTimerChannelUpdate(newChannel, persist)) {
+                    respondError(packet, DebugProtocol::Status::TransportError);
+                    return;
                 }
             }
-
-            if (persist) {
-                channelManager.storeChannel(newChannel);
-            }
-
-            if (channelChanged) {
-                channelManager.applyChannel(newChannel);
+            else
+            {
+                if (persist)
+                {
+                    channelManager.storeChannel(newChannel);
+                }
+                if (channelChanged)
+                {
+                    channelManager.applyChannel(newChannel);
+                }
             }
 
             respondToPc(packet, DebugProtocol::Status::Ok);
@@ -487,6 +488,26 @@ void DebugSerialBridge::respondError(DebugProtocol::Packet& packet, DebugProtoco
     respondToPc(packet, status);
 }
 
+void DebugSerialBridge::onCommAck(ProtocolCmd cmd, ReliableProtocol::AckType type, uint8_t status) {
+    if (!channelAckPending || cmd != ProtocolCmd::SET_CHANNEL) {
+        return;
+    }
+    bool success = (type == ReliableProtocol::AckType::Ack && status == static_cast<uint8_t>(ProtocolStatus::OK));
+    if (!success) {
+        Serial.printf("[DEBUG] SET_CHANNEL ack failed (type=%u status=%u)\n", static_cast<unsigned>(type), static_cast<unsigned>(status));
+        channelAckPersist = false;
+        channelAckPending = false;
+        return;
+    }
+
+    if (channelAckPersist) {
+        channelAckPersist = false;
+        channelManager.storeChannel(pendingChannelTarget);
+    }
+    channelManager.applyChannel(pendingChannelTarget);
+    channelAckPending = false;
+}
+
 void DebugSerialBridge::handleTimerPacket(const uint8_t* mac, const DebugProtocol::Packet& packet) {
     if (packet.command == DebugProtocol::Command::GetTimerStats &&
         packet.dataLength >= sizeof(DebugProtocol::TimerStatsPayload)) {
@@ -618,4 +639,41 @@ void DebugSerialBridge::populateRemoteSnapshot(DebugProtocol::TimerSnapshot& sna
     snapshot.elapsedSeconds = active->elapsed;
     snapshot.outputOn = active->outputState ? 1 : 0;
     snapshot.overrideActive = 0;
+}
+bool DebugSerialBridge::queueTimerChannelUpdate(uint8_t newChannel, bool persist) {
+    const SlaveDevice* active = commManager.getActiveDevice();
+    if (!active) {
+        return false;
+    }
+
+    if (channelAckPending) {
+        uint32_t start = millis();
+        while (channelAckPending) {
+            commManager.loop();
+            serialLink.loop();
+            if (millis() - start > 1000) {
+                Serial.println("[DEBUG] Timeout waiting for previous channel ACK");
+                channelAckPending = false;
+                channelAckPersist = false;
+                break;
+            }
+            delay(5);
+            yield();
+        }
+    }
+
+    ProtocolMsg update = {};
+    update.cmd = static_cast<uint8_t>(ProtocolCmd::SET_CHANNEL);
+    update.channel = newChannel;
+
+    pendingChannelTarget = newChannel;
+    channelAckPersist = persist;
+    channelAckPending = true;
+
+    void* context = reinterpret_cast<void*>(static_cast<uintptr_t>(ProtocolCmd::SET_CHANNEL));
+    if (!commManager.sendProtocol(active->mac, update, "DEBUG-SET_CHANNEL", true, context)) {
+        channelAckPending = false;
+        return false;
+    }
+    return true;
 }

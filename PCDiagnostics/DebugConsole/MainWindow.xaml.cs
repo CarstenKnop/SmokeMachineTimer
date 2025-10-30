@@ -978,7 +978,11 @@ public partial class MainWindow : Window
             {
                 byte[] channelPayload = { channel, 1 };
                 await _client.SendAsync(DebugProtocol.Command.ForceChannel, channelPayload, token).ConfigureAwait(false);
-                await Task.Delay(session.SettleDelayMs, token).ConfigureAwait(false);
+                bool settled = await WaitForChannelAsync(channel, session, token).ConfigureAwait(false);
+                if (!settled)
+                {
+                    AppendLog($"Channel {channel} did not settle before sampling; continuing.");
+                }
                 int samplesRecorded = 0;
                 int attempts = 0;
                 int idx = channel - 1;
@@ -1053,6 +1057,47 @@ public partial class MainWindow : Window
         {
             AppendLog($"Scan error for {session.Timer.DisplayName}: {ex.Message}");
         }
+    }
+
+    private async Task<bool> WaitForChannelAsync(byte channel, ScannerSession session, CancellationToken token)
+    {
+        int maxAttempts = Math.Max(1, session.SettleDelayMs / 40);
+        maxAttempts = Math.Clamp(maxAttempts, 3, 15);
+        for (int attempt = 0; attempt < maxAttempts && !token.IsCancellationRequested; attempt++)
+        {
+            var remotePacket = await _client.SendAsync(DebugProtocol.Command.GetRemoteStats, Array.Empty<byte>(), token).ConfigureAwait(false);
+            var remotePayload = ExtractStruct<DebugProtocol.RemoteStatsPayload>(remotePacket);
+            bool remoteReady = remotePacket.Status == DebugProtocol.Status.Ok && remotePayload.HasValue && remotePayload.Value.RemoteLink.Channel == channel;
+
+            bool timerReady = false;
+            if (remoteReady)
+            {
+                var timerPacket = await _client.SendAsync(DebugProtocol.Command.GetTimerStats, Array.Empty<byte>(), token).ConfigureAwait(false);
+                var timerPayload = ExtractStruct<DebugProtocol.TimerStatsPayload>(timerPacket);
+                timerReady = timerPacket.Status == DebugProtocol.Status.Ok && timerPayload.HasValue && timerPayload.Value.Link.Channel == channel;
+                if (!timerReady && !_timerSampleFaultLogged[channel - 1])
+                {
+                    AppendLog($"Timer not yet on channel {channel}: status {DebugProtocol.DescribeStatus(timerPacket.Status)}");
+                    _timerSampleFaultLogged[channel - 1] = true;
+                }
+            }
+            else if (!_remoteSampleFaultLogged[channel - 1])
+            {
+                AppendLog($"Remote still switching to channel {channel}: status {DebugProtocol.DescribeStatus(remotePacket.Status)}");
+                _remoteSampleFaultLogged[channel - 1] = true;
+            }
+
+            if (remoteReady && timerReady)
+            {
+                _remoteSampleFaultLogged[channel - 1] = false;
+                _timerSampleFaultLogged[channel - 1] = false;
+                return true;
+            }
+
+            int delayMs = Math.Max(20, session.SettleDelayMs / 2);
+            await Task.Delay(delayMs, token).ConfigureAwait(false);
+        }
+        return false;
     }
 
     private async Task RestoreChannelAsync(byte channel)

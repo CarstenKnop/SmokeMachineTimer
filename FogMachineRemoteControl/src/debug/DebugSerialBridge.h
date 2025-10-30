@@ -4,6 +4,8 @@
 #include <vector>
 #include "ReliableSerial.h"
 #include "DebugProtocol.h"
+#include "protocol/Protocol.h"
+#include "ReliableProtocol.h"
 
 class CommManager;
 class DeviceManager;
@@ -17,6 +19,7 @@ public:
     void loop();
 
     void handleTimerPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
+    void onCommAck(ProtocolCmd cmd, ReliableProtocol::AckType type, uint8_t status);
 
     const DebugProtocol::TimerStatsPayload& getLastTimerStats() const { return lastTimerStats; }
     bool isPcConnected() const { return pcConnected; }
@@ -50,4 +53,9 @@ private:
     void completePending(uint16_t requestId);
     uint16_t allocateRequestId();
     void populateRemoteSnapshot(DebugProtocol::TimerSnapshot& snapshot) const;
+    bool queueTimerChannelUpdate(uint8_t newChannel, bool persist);
+
+    bool channelAckPending = false;
+    bool channelAckPersist = false;
+    uint8_t pendingChannelTarget = 0;
 };

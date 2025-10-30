@@ -565,6 +565,10 @@ void CommManager::handleAck(const uint8_t* mac, ReliableProtocol::AckType type, 
     const char* statusText = transportStatus ? transportStatus : protocolStatus;
     if (!statusText) statusText = "-";
 
+    if (debugBridge) {
+        debugBridge->onCommAck(cmd, type, status);
+    }
+
     switch (type) {
         case ReliableProtocol::AckType::Ack:
             Serial.printf("[COMM] ACK %s (%s) status=%u (%s) from %02X:%02X:%02X:%02X:%02X:%02X\n",

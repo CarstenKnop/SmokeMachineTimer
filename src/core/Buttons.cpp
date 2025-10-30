@@ -1,21 +1,18 @@
 #include "Buttons.h"
 
 void Buttons::begin() {
-    pinMode(Defaults::BTN_UP, INPUT_PULLUP);
-    pinMode(Defaults::BTN_DOWN, INPUT_PULLUP);
-    pinMode(Defaults::BTN_HASH, INPUT_PULLUP);
-    pinMode(Defaults::BTN_STAR, INPUT_PULLUP);
+    // Button reads disabled by request. Do not configure or sample the pins so
+    // the timer firmware will ignore any front-panel button presses.
+    // Leave last* values cleared so no edge events are reported.
+    lastUp = lastDown = lastHash = lastStar = false;
 }
 
 ButtonState Buttons::poll() {
     ButtonState st;
-    bool up = !digitalRead(Defaults::BTN_UP);
-    bool down = !digitalRead(Defaults::BTN_DOWN);
-    bool hash = !digitalRead(Defaults::BTN_HASH);
-    bool star = !digitalRead(Defaults::BTN_STAR);
-    st.upEdge = up && !lastUp; st.downEdge = down && !lastDown;
-    st.hashEdge = hash && !lastHash; st.starEdge = star && !lastStar;
-    st.up = up; st.down = down; st.hash = hash; st.star = star;
-    lastUp = up; lastDown = down; lastHash = hash; lastStar = star;
+    // Buttons disabled: report all buttons as not pressed and no edges.
+    st.up = st.down = st.hash = st.star = false;
+    st.upEdge = st.downEdge = st.hashEdge = st.starEdge = false;
+    // Keep last* cleared to avoid spurious edges if buttons are re-enabled later.
+    lastUp = lastDown = lastHash = lastStar = false;
     return st;
 }

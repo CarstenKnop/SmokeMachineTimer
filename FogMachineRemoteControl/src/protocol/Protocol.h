@@ -38,3 +38,7 @@ struct __attribute__((packed)) ProtocolMsg {
     uint8_t channel;      // preferred ESP-NOW channel
     uint8_t reserved[3];  // align to 4-byte boundary for future use
 };
+
+namespace ProtocolFlags {
+    constexpr uint8_t ChannelPersist = 0x01;
+}

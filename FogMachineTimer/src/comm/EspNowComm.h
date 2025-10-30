@@ -28,10 +28,19 @@ private:
     ReliableProtocol::HandlerResult handleFrame(const uint8_t* mac, const uint8_t* payload, size_t len);
     ReliableProtocol::HandlerResult handleDebugPacket(const uint8_t* mac, const DebugProtocol::Packet& packet);
     void ensurePeer(const uint8_t* mac);
+    void scheduleChannelApply(uint8_t channel, const uint8_t* mac, bool sendStatus, bool persist);
+    void processPendingChannelChange();
     ReliableEspNow::Link reliableLink;
     static EspNowComm* instance;
     // RSSI capture via promiscuous callback
     static void wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type);
     static volatile int8_t lastRxRssi;
     static uint8_t lastSenderMac[6];
+    bool pendingChannelChange_ = false;
+    bool pendingChannelSendStatus_ = false;
+    bool pendingChannelMacValid_ = false;
+    bool pendingChannelPersist_ = false;
+    uint8_t pendingChannelValue_ = 0;
+    uint8_t pendingChannelMac_[6] = {0};
+    uint32_t pendingChannelApplyAtMs_ = 0;
 };

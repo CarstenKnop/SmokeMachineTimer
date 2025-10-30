@@ -17,7 +17,8 @@
 
 - Uses the shared `ReliableProtocol` core for framing (CRC16 verification, packet IDs, ack/nak exchanges, retry windows) so ESP-NOW and debug transports expose identical semantics and statistics.
 - Primary control path is ESP-NOW via `ReliableEspNow`; the timer responds to pairing, output override, name read/write, RSSI queries, and `SET_CHANNEL` updates and broadcasts status packets that include the current channel.
-- On boot, applies the persisted channel once Wi-Fi/ESP-NOW is initialized. Subsequent `SET_CHANNEL` requests are validated, persisted, and applied immediately. When the remote issues a channel hop via the debug bridge it sends `SET_CHANNEL` before retuning locally; the timer must process and ack this message promptly so the follow-up stats queries succeed on the new channel without transient timeouts.
+- On boot, applies the persisted channel once Wi-Fi/ESP-NOW is initialized. Subsequent `SET_CHANNEL` requests are validated and then staged: the timer acks first, waits for any outstanding retries to clear, and only then retunes the radio. The new `ProtocolFlags::ChannelPersist` bit determines whether the hop is written to EEPROM (`SetChannel`) or treated as transient (`ForceChannel`). This sequencing keeps the timer on the caller's channel long enough for the ACK to return and prevents diagnostics scans from overwriting the stored channel.
+- Channel storage now separates the persisted choice from the currently active radio tuning. Transient hops update the active channel immediately while leaving the stored value untouched; persistent hops keep both in sync after the deferred retune.
 - `ReliableProtocol::TransportStats` instances back link-health counters (delivered, retried, lost, corrupt) and are queryable via debug requests from the remote.
 - All inbound packets are size-checked against the protocol header and CRC before handling; failures increment stats and are discarded.
 

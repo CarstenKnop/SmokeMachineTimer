@@ -83,7 +83,8 @@ Responsibilities:
 
 - Persist the selected channel in EEPROM with validation on boot (magic + version guards). Invalid or unsupported entries trigger a factory reset of the channel storage segment.
 - Apply the stored channel to the Wi-Fi/ESP-NOW radio after any temporary scan completes.
-- When a new channel is selected via the debug interface, send the `SET_CHANNEL` protocol message to the active timer while the remote is still tuned to the previous channel, then retune the remote once the request is queued. This ordering guarantees both endpoints remain in sync and prevents timers from timing out on the first post-hop query.
+- When a new channel is selected via the debug interface, enqueue the `SET_CHANNEL` protocol message with the timer and wait for a positive ACK before retuning the remote. During this window outgoing channel hops are serialized so retries do not overlap. The ACK-driven hop keeps both ends aligned and avoids timers timing out on the first post-hop query.
+- Distinguish persistent (`SetChannel`) vs transient (`ForceChannel`) hops. Persistent updates raise the new `ProtocolFlags::ChannelPersist` bit so timers write EEPROM after the ACK; transient hops clear the bit so diagnostics and scans can bounce across channels without overwriting the stored selection.
 - Provide a channel survey that asynchronously scans 2.4 GHz channels 1–13, ranks them by AP count and aggregate RSSI, and exposes the ordered list to the UI. The survey parks the radio back on the stored channel when finished.
 - Minimise flash wear: do not rewrite EEPROM if the chosen channel already matches the stored value.
 - Notify CommManager when the stored channel changes so that discovery, pairing, and existing peers hop immediately.
@@ -97,8 +98,10 @@ UI requirements:
 4.2.5. Discovery Channel Sweep
 Discovery/pairing now sweeps through all supported channels until a timer responds. CommManager schedules timed hops (e.g., every few hundred milliseconds) across channels 1–13 during discovery to locate timers that were left on another channel. On success, discovery locks back to the stored channel. RemoteChannelManager keeps the stored channel authoritative so subsequent operations stay consistent.
 
+Transient discovery sweeps issue `ForceChannel` hops without the persist flag so the timer follows the sweep only for the duration of the scan. Once the stored channel is re-applied both peers return to their canonical frequency.
+
 4.2.6. Channel Sync Messaging
-Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sends `SET_CHANNEL` to the target timer so both sides remain on the same channel. The message is dispatched before the remote retunes locally to avoid a momentary split. Timers acknowledge by switching channels and replying with STATUS.
+Protocol includes `SET_CHANNEL` messages. Whenever the stored channel changes (manual selection or during pairing) the remote sets the new `ProtocolFlags::ChannelPersist` bit in the request, sends it to the active timer, and waits for the ACK before retuning locally. Timers acknowledge by switching channels, mirroring the new value in their STATUS payloads, and (when `ChannelPersist` is set) persisting the choice to EEPROM. Transient hops used by diagnostics (`ForceChannel`) clear the flag so timers retune temporarily without rewriting flash.
 
 5. Pairing and Device Management
 The remote will feature a user-friendly system for discovering, pairing, and managing slave devices.

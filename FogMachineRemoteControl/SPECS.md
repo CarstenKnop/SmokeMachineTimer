@@ -80,6 +80,7 @@ Implementation:
 - `DebugSerialBridge` runs in the remote firmware, forwarding requests from the PC to timers via `CommManager`, aggregating transport metrics from both the ESP-NOW and serial links, and returning structured responses.
 - Transport health (lost frames, retries, uptime, last error) is tracked in `ReliableProtocol::TransportStats` and made fetchable over the debug link to support tooling.
 - A companion Windows diagnostic app (`PCDiagnostics/DebugConsole`) consumes `DebugProtocol` over USB serial, providing live stats, channel data, and EEPROM tools for field analysis. Channel scans drive gradient heatmaps for both remote and timer RSSI, show per-channel sample counts and last RSSI markers, retry failed polls (Timeout/TransportError/NotReady) up to a capped budget, and log the first failure per channel to aid troubleshooting.
+- Channel control requests now tag persistent writes with `ProtocolFlags::ChannelPersist`; the remote waits for the timer's ACK before retuning so diagnostics sampling never loses contact mid-hop, and transient `ForceChannel` hops bounce across channels without modifying the timer's stored selection.
 
 ## Notes
 

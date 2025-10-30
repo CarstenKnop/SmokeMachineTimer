@@ -12,6 +12,7 @@
 
 namespace {
 constexpr uint16_t TIMER_EEPROM_SIZE = 256;
+constexpr uint32_t CHANNEL_APPLY_GRACE_MS = 150;
 const char* cmdToString(ProtocolCmd cmd) {
     switch (cmd) {
         case ProtocolCmd::PAIR: return "PAIR";
@@ -118,6 +119,7 @@ void EspNowComm::loop() {
     reliableLink.loop();
     // Push status to the last known sender when the output state changes
     pushStatusIfStateChanged();
+    processPendingChannelChange();
 }
 
 int8_t EspNowComm::getRssi() const {
@@ -238,18 +240,37 @@ ReliableProtocol::HandlerResult EspNowComm::processCommand(const ProtocolMsg& ms
             config.saveName(msg.name);
             sendStatus(mac, true);
             break;
-        case ProtocolCmd::SET_CHANNEL:
-            if (channelSettings.isChannelSupported(msg.channel)) {
-                if (!channelSettings.setChannel(msg.channel)) {
-                    channelSettings.apply();
-                }
-                sendStatus(mac, true);
-            } else {
+        case ProtocolCmd::SET_CHANNEL: {
+            if (!channelSettings.isChannelSupported(msg.channel)) {
                 result.ack = false;
                 result.status = static_cast<uint8_t>(ProtocolStatus::INVALID_PARAM);
-                sendStatus(mac, true);
+                break;
             }
+            bool persist = (msg.reserved[0] & ProtocolFlags::ChannelPersist) != 0;
+            bool pendingSame = pendingChannelChange_ && pendingChannelValue_ == msg.channel && pendingChannelPersist_ == persist;
+            bool storedUpdated = persist ? channelSettings.storeChannel(msg.channel) : false;
+
+            if (persist) {
+                if (storedUpdated || pendingSame) {
+                    scheduleChannelApply(msg.channel, mac, true, true);
+                } else {
+                    channelSettings.apply();
+                    sendStatus(mac, true);
+                }
+            } else {
+                if (pendingSame) {
+                    scheduleChannelApply(msg.channel, mac, true, false);
+                } else if (channelSettings.getChannel() == msg.channel && !pendingChannelChange_) {
+                    sendStatus(mac, true);
+                } else {
+                    scheduleChannelApply(msg.channel, mac, true, false);
+                }
+            }
+
+            result.ack = true;
+            result.status = static_cast<uint8_t>(ProtocolStatus::OK);
             break;
+        }
         case ProtocolCmd::FACTORY_RESET:
             Serial.println("[SLAVE] FACTORY_RESET -> wiping EEPROM and restoring defaults");
             config.factoryReset();
@@ -317,8 +338,21 @@ ReliableProtocol::HandlerResult EspNowComm::handleDebugPacket(const uint8_t* mac
                 response.status = DebugProtocol::Status::InvalidArgument;
                 DebugProtocol::clearData(response);
             } else {
-                if (!channelSettings.setChannel(channel)) {
-                    channelSettings.apply();
+                bool persist = (packet.command == DebugProtocol::Command::SetChannel);
+                bool pendingSame = pendingChannelChange_ && pendingChannelValue_ == channel && pendingChannelPersist_ == persist;
+                if (persist) {
+                    bool storedUpdated = channelSettings.storeChannel(channel);
+                    if (storedUpdated || pendingSame) {
+                        scheduleChannelApply(channel, mac, false, true);
+                    } else {
+                        channelSettings.apply();
+                    }
+                } else {
+                    if (pendingSame) {
+                        scheduleChannelApply(channel, mac, false, false);
+                    } else {
+                        scheduleChannelApply(channel, mac, false, false);
+                    }
                 }
                 DebugProtocol::clearData(response);
             }
@@ -404,4 +438,38 @@ void EspNowComm::pushStatusIfStateChanged() {
         instance->ensurePeer(broadcast);
         instance->sendStatus(broadcast, false);
     }
+}
+
+void EspNowComm::scheduleChannelApply(uint8_t channel, const uint8_t* mac, bool sendStatus, bool persist) {
+    pendingChannelChange_ = true;
+    pendingChannelValue_ = channel;
+    pendingChannelApplyAtMs_ = millis() + CHANNEL_APPLY_GRACE_MS;
+    pendingChannelPersist_ = persist;
+    pendingChannelSendStatus_ = pendingChannelSendStatus_ || sendStatus;
+    if (mac) {
+        memcpy(pendingChannelMac_, mac, sizeof(pendingChannelMac_));
+        pendingChannelMacValid_ = true;
+    }
+}
+
+void EspNowComm::processPendingChannelChange() {
+    if (!pendingChannelChange_) {
+        return;
+    }
+    uint32_t now = millis();
+    if (static_cast<int32_t>(now - pendingChannelApplyAtMs_) < 0) {
+        return;
+    }
+    if (pendingChannelPersist_) {
+        channelSettings.apply();
+    } else {
+        channelSettings.applyTransient(pendingChannelValue_);
+    }
+    if (pendingChannelSendStatus_ && pendingChannelMacValid_) {
+        sendStatus(pendingChannelMac_, true);
+    }
+    pendingChannelChange_ = false;
+    pendingChannelSendStatus_ = false;
+    pendingChannelMacValid_ = false;
+    pendingChannelPersist_ = false;
 }

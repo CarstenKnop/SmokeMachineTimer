@@ -13,6 +13,7 @@ void TimerChannelSettings::begin(void (*factoryResetCallback)()) {
     if (!valid_ || !isChannelSupported(storedChannel_)) {
         runFactoryReset();
     }
+    activeChannel_ = storedChannel_;
 }
 
 bool TimerChannelSettings::isChannelSupported(uint8_t channel) const {
@@ -47,21 +48,38 @@ bool TimerChannelSettings::setChannel(uint8_t channel) {
     if (!isChannelSupported(channel)) {
         return false;
     }
+    bool changed = storeChannel(channel);
+    apply();
+    return changed;
+}
+
+bool TimerChannelSettings::storeChannel(uint8_t channel) {
+    if (!isChannelSupported(channel)) {
+        return false;
+    }
     if (storedChannel_ == channel && valid_) {
         return false;
     }
     storedChannel_ = channel;
     valid_ = true;
     write();
-    apply();
     return true;
 }
 
-void TimerChannelSettings::apply() const {
+void TimerChannelSettings::apply() {
     if (!isChannelSupported(storedChannel_)) {
         return;
     }
     esp_wifi_set_channel(storedChannel_, WIFI_SECOND_CHAN_NONE);
+    activeChannel_ = storedChannel_;
+}
+
+void TimerChannelSettings::applyTransient(uint8_t channel) {
+    if (!isChannelSupported(channel)) {
+        return;
+    }
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    activeChannel_ = channel;
 }
 
 void TimerChannelSettings::runFactoryReset() {
@@ -70,6 +88,7 @@ void TimerChannelSettings::runFactoryReset() {
     }
     storedChannel_ = Defaults::DEFAULT_CHANNEL;
     valid_ = true;
+    activeChannel_ = storedChannel_;
     write();
 }
 

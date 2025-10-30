@@ -5,9 +5,12 @@
 class TimerChannelSettings {
 public:
     void begin(void (*factoryResetCallback)());
-    uint8_t getChannel() const { return storedChannel_; }
+    uint8_t getChannel() const { return activeChannel_; }
+    uint8_t getStoredChannel() const { return storedChannel_; }
+    bool storeChannel(uint8_t channel);
     bool setChannel(uint8_t channel);
-    void apply() const;
+    void apply();
+    void applyTransient(uint8_t channel);
     bool isChannelSupported(uint8_t channel) const;
     void resetToDefault();
 private:
@@ -21,6 +24,7 @@ private:
     static constexpr int ADDR_VER   = ADDR_BASE + 1;
     static constexpr int ADDR_VALUE = ADDR_BASE + 2;
     uint8_t storedChannel_ = Defaults::DEFAULT_CHANNEL;
+    uint8_t activeChannel_ = Defaults::DEFAULT_CHANNEL;
     bool valid_ = false;
     void (*factoryResetCb_)() = nullptr;
 };

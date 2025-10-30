@@ -665,6 +665,7 @@ bool DebugSerialBridge::queueTimerChannelUpdate(uint8_t newChannel, bool persist
     ProtocolMsg update = {};
     update.cmd = static_cast<uint8_t>(ProtocolCmd::SET_CHANNEL);
     update.channel = newChannel;
+    update.reserved[0] = persist ? ProtocolFlags::ChannelPersist : 0;
 
     pendingChannelTarget = newChannel;
     channelAckPersist = persist;

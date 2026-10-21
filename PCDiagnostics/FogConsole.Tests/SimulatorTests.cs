@@ -113,7 +113,7 @@ public class SimulatorTests
             Assert.InRange(d.Rssi, -98, -30);
             Assert.InRange(d.Ton, 0.1, 9999.9);
             Assert.Equal(6, d.Channel);
-            Assert.Equal("2.0.0", d.Fw);
+            Assert.Equal("2.1.0", d.Fw);
         });
         Assert.Equal(7, f.Devs.Select(d => d.SlotId).Distinct().Count());
         Assert.Equal(0, f.Active);
@@ -782,7 +782,7 @@ public class SimulatorTests
         {
             Assert.NotNull(d.Timer);
             Assert.InRange(d.Timer!.AgeMs, 0, 10_000);   // never older than ~10 s
-            Assert.StartsWith("2.0", d.Timer.Fw);
+            Assert.StartsWith("2.1", d.Timer.Fw);
         });
         // data of different timers was captured at different moments
         Assert.True(s.Devs.Select(d => d.Timer!.AgeMs).Distinct().Count() > 3);
@@ -877,7 +877,7 @@ public class SimulatorTests
         Assert.Equal(0, r.DevStat!.Index);
         Assert.NotNull(r.DevStat.Link);
         Assert.NotNull(r.DevStat.Timer);
-        Assert.Equal("2.0.0", r.DevStat.Timer!.Fw);
+        Assert.Equal("2.1.0", r.DevStat.Timer!.Fw);
         Assert.InRange(r.DevStat.Timer.AgeMs, 0, 500);
     }
 

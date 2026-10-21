@@ -57,9 +57,13 @@ un-maximize it. The layout adapts from 1000 px up to 4K: dashboard cards reflow 
 8. **Firmware** - update the remote or a timer over its USB cable: the firmware is recognised (timer or remote, version), checked
    (ESP32-C3 image, checksum, SHA-256), written through the chip's ROM bootloader and verified by the chip's MD5; settings and pairing
    survive an *Update*. *Check device* identifies the chip and compares the flash without writing. See [`docs/FIRMWARE_UPDATE.md`](../docs/FIRMWARE_UPDATE.md).
+   The second route, **Over the air (through the remote)**, updates the timers while they stay inside their machines: tick the timers, *Check support*,
+   *Update selected timers*. The PC runs the transfer (windowed, selective repeat, SHA-256 check, activation, wait for the new version); the remote only
+   forwards frames (`otaTx` / `otaRx` / `otaHold` of FogSerial/2). The first update of a timer, and every remote update, is still over USB.
+   See [`docs/OTA_UPDATE.md`](../docs/OTA_UPDATE.md) for the protocol and the Fog Console manual for the page.
 9. **Settings** - the remote's settings (TX power, brightness, auto-off, signal bar range, battery calibration; for a
    timer on USB its name, durations and start phase) and this application's preferences (theme, buffer sizes,
-   simulator options).
+   simulator options, the over-the-air key - default `FogLink-OTA-v1`, the same text the timer firmware is built with).
 
 Keyboard: `Ctrl+1` ... `Ctrl+8` switch pages, `F5` rescans the COM ports.
 Settings are stored in `%AppData%\FogConsole\settings.json`; unexpected errors are written to
@@ -131,7 +135,7 @@ FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
 | `--no-settings` | do not read or write the settings file (implied by `--shot`) |
 | `--shot file.png` | render the window to a PNG after `--delay` seconds (default 4); `--shot-scale 1` = one pixel per DIP (small files) |
 | `--exit` | quit after the screenshot; without `--shot` run for `--delay` seconds and quit (a quick smoke test, exit code 0 = no crash) |
-| `--action name` | prepare a situation before the shot: `survey`, `linktest`, `migrate`, `fail`, `baseline`, `hold`, `forceon`, `rename`, `device`, `console`, `packets`, `raw`, `discover`, `simpanel`, `showcase`, `firmware`, `firmwareflash`, `firmwaredone` |
+| `--action name` | prepare a situation before the shot: `survey`, `linktest`, `migrate`, `fail`, `baseline`, `hold`, `forceon`, `rename`, `device`, `console`, `packets`, `raw`, `discover`, `simpanel`, `showcase`, `firmware`, `firmwareflash`, `firmwaredone`, `otaready`, `otaprogress`, `otadone`, `otafail` |
 | `--scroll px` | scroll the page content before the shot |
 
 The pictures above come from `docs\make-screenshots.ps1`, which runs the app with `--sim --seed 42` once per page and theme
@@ -146,16 +150,26 @@ PCDiagnostics/
     Protocol/                  messages, tolerant JSON parser, request builders
     Transport/                 ITransport, line framing, serial port (+ friendly port names)
     Hub/                       HubClient: request/response matching, keep-alive, reconnect, command tracking
-    Simulator/                 virtual remote + timers + 2.4 GHz band (deterministic, seeded)
+    Simulator/                 virtual remote + timers + 2.4 GHz band (deterministic, seeded); each timer has a model of the over-the-air
+                               receiver (SimOtaReceiver), including timers without a second slot and timers without OTA firmware
     Flashing/                  USB firmware update: SLIP + ROM bootloader client (esptool protocol), image/partition parsing,
                                firmware catalog, flash plans, simulated chip (SimulatedRom) and demo images
+    Ota/                       over-the-air update: frames and HMAC authentication (OtaProtocol), the transfer state machine with an
+                               injectable clock (OtaTransfer), capability probe, the link through the hub (OtaLink: up to 6 otaTx in
+                               flight, retry on busy), the queue over several timers (OtaUpdater)
     Diagnostics/               counter maths, health rules, channel quality, snapshot compare/export
     Services/                  settings, theme, toasts, command center, hold-to-fog, dialogs, screenshots, startup options
     ViewModels/  Views/  Controls/  Converters/  Theme/
   FogConsole.Tests/            xUnit: protocol, framing, hub, simulator, diagnostics, flashing (incl. the real esptool against the
-                               simulated chip), view models, end-to-end
+                               simulated chip), over-the-air (spec test vectors, transfers over lossy / reordering / duplicating links
+                               in virtual time, power cuts, wrong key, no slot, through the hub and the simulator, view model), view
+                               models, end-to-end
   docs/                        screenshots + make-screenshots.ps1
 ```
+
+The over-the-air tests include a **peer test**: `OtaPeerCompatibilityTests` drives `tools/native-tests/build/ota_peer.exe` - the timer's real receiver
+code (`lib/FogLink/FogOta.cpp`) as a program - with the C# sender, so both languages are proven to speak the same protocol. The test is skipped
+silently when the program has not been built (`powershell -File tools/native-tests/run.ps1` builds it).
 
 `HubClient` only knows `ITransport`; the app uses either the serial transport or the simulator's in-memory transport,
 so everything above the transport is the same code in both modes.

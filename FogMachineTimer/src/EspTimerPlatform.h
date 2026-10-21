@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <functional>
+#include "EspOtaTarget.h"
 #include "FogRadio.h"
 #include "FogStore.h"
 #include "FogSys.h"
@@ -14,6 +15,8 @@ public:
     using Tap = std::function<void(bool tx, const uint8_t* mac, int8_t rssi, const uint8_t* data, size_t len)>;
 
     Fog::FogRadio radio;
+    EspOtaTarget ota;                           // the application slot that is not running (over-the-air update)
+    std::function<void()> onQuiesce;            // drives the output off (set by main): the next flash step blocks the loop
     Fog::LifeCounters life;
     Fog::LoopMeter loop;
     uint8_t resetReason = 0;
@@ -35,6 +38,9 @@ public:
     void identify(uint16_t ms) override { identifyUntil_ = millis() + ms; if (!identifyUntil_) identifyUntil_ = 1; }
     void fillInfo(Fog::InfoPayload& info) override;
     uint32_t random(uint32_t n) override { return n ? esp_random() % n : 0; }
+    Fog::OtaTarget* otaTarget() override { return &ota; }
+    void quiesceOutput() override { if (onQuiesce) onQuiesce(); }
+    void log(const char* msg) override;
 
     bool loadSettings(Fog::TimerSettings& out) const { return store_.load(out); }
     bool rebootDue() const { return rebootAt_ && static_cast<int32_t>(millis() - rebootAt_) >= 0; }

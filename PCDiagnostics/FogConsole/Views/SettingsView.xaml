@@ -144,6 +144,12 @@
                         </StackPanel>
                     </StackPanel>
 
+                    <TextBlock Text="Over-the-air key" Style="{StaticResource SettingLabel}"/>
+                    <TextBox Text="{Binding OtaKey, UpdateSourceTrigger=PropertyChanged}" Width="300" HorizontalAlignment="Left" MaxLength="64" FontFamily="{StaticResource Fog.MonoFont}"
+                             AutomationProperties.Name="Over-the-air key"/>
+                    <TextBlock Text="Proves to a timer that a firmware update may come from this tool. It must be the key the timer firmware was built with (default FogLink-OTA-v1); it keeps accidents out, it is not a secret (see OTA_UPDATE.md)."
+                               Style="{StaticResource Fog.Caption}" Margin="0,4,0,0" TextWrapping="Wrap" TextTrimming="None"/>
+
                     <TextBlock Text="Simulator" Style="{StaticResource SettingLabel}"/>
                     <ComboBox ItemsSource="{Binding SimulatorKinds}" SelectedIndex="{Binding SimKindIndex}" Width="260" HorizontalAlignment="Left" AutomationProperties.Name="Simulator kind"/>
                     <TextBlock Text="What the offline demo pretends to be. Takes effect the next time the simulator starts." Style="{StaticResource Fog.Caption}" Margin="0,4,0,0"/>

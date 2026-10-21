@@ -1,6 +1,6 @@
 {
   "name": "FogLink",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Robust ESP-NOW link + USB JSON protocol shared by FogMachineRemoteControl and FogMachineTimer",
   "frameworks": "arduino",
   "platforms": "espressif32",

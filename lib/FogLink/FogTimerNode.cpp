@@ -16,6 +16,7 @@ void TimerNode::begin(uint32_t nowMs, const TimerSettings& settings, uint32_t bo
     if (!validTenths(s_.offTenths)) s_.offTenths = kDefaultOffTenths;
     boot_ = bootCount;
     startMs_ = nowMs;
+    ota_.setTarget(plat_.otaTarget());
     engine_.begin(nowMs, s_.onTenths, s_.offTenths, s_.startPhaseOn != 0);
     // Announce ourselves right after power-up so the remote notices the reboot within a few ms.
     bootBeats_ = 3;
@@ -111,7 +112,7 @@ void TimerNode::onFrame(const uint8_t* srcMac, int8_t rssi, const uint8_t* data,
     ++rxFrames;
     // Signal statistics describe the link to the remote, so only count frames that come from a remote
     // (other timers on the channel send Status frames that we hear too).
-    const bool fromRemote = (f.type == Type::Probe || f.type == Type::Cmd);
+    const bool fromRemote = (f.type == Type::Probe || f.type == Type::Cmd || f.type == Type::Ota);
     if (fromRemote && rssi < 0 && rssi > -120) {
         lastRssi_ = rssi;
         if (!rssiCount_ || rssi < rssiMin_) rssiMin_ = rssi;
@@ -131,6 +132,10 @@ void TimerNode::onFrame(const uint8_t* srcMac, int8_t rssi, const uint8_t* data,
         }
         case Type::Cmd:
             handleCmd(srcMac, f, nowMs);
+            break;
+        case Type::Ota:
+            ++rxOta;
+            ota_.onPayload(srcMac, f.payload, f.len, nowMs);
             break;
         default:
             break;   // STATUS/INFO from other timers: not for us
@@ -288,6 +293,7 @@ void TimerNode::applyLocalChange(uint32_t nowMs) {
 }
 
 void TimerNode::tick(uint32_t nowMs) {
+    if (otaQuiesced_ && ota_.state() != Ota::Activating) otaQuiesced_ = false;      // the activation did not happen: carry on
     // 1. cycle engine -> event status on every output / phase change
     const bool changed = engine_.update(nowMs);
     const uint8_t out = engine_.outputOn(nowMs) ? 1 : 0;
@@ -340,6 +346,18 @@ void TimerNode::tick(uint32_t nowMs) {
         ++txBeats;
         sendStatusNow(nullptr, nowMs, ST_HEARTBEAT);
     }
+
+    // 7. firmware update work (erase one sector, hash a slice, ...) - last, so everything above was already queued for this pass
+    if (!otaDeferred_) ota_.tick(nowMs);
+}
+
+bool TimerNode::otaSend(const uint8_t* mac, const uint8_t* payload, size_t len) {
+    if (memcmp(mac, kUsbMac, 6) == 0) {
+        if (!usbSink_) return false;
+        usbSink_->onOtaReply(payload, len);
+        return true;
+    }
+    return sendFrame(mac, Type::Ota, payload, len);
 }
 
 }  // namespace Fog

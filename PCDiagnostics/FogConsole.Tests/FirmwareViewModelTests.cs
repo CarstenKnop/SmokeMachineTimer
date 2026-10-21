@@ -178,7 +178,7 @@ public class FirmwareViewModelTests : IDisposable
         Assert.Equal(FlashPhase.Succeeded, fw.Phase);
         Assert.Equal(ChipLevel.Ok, fw.ResultLevel);
         Assert.Contains("Done", fw.ResultText);
-        Assert.Contains("2.1.0", fw.DeviceDetail);
+        Assert.Contains("2.2.0", fw.DeviceDetail);
         Assert.Equal(1.0, fw.Progress);
         Assert.NotEmpty(fw.LogLines);
         Assert.Contains(fw.LogLines, l => l.Contains("verified"));
@@ -408,8 +408,8 @@ public class FirmwareViewModelTests : IDisposable
         var fw = await SimReadyAsync();
         Assert.True(fw.HasTimers);
         Assert.Equal(_app.Fleet.Devices.Count, fw.Timers.Count);
-        // the demo timer firmware is 2.1.0; the simulated timers report an older version
-        Assert.All(fw.Timers.Where(t => t.Version != "-"), t => Assert.Contains("older than 2.1.0", t.Verdict));
+        // the demo timer firmware is 2.2.0; the simulated timers report an older version
+        Assert.All(fw.Timers.Where(t => t.Version != "-"), t => Assert.Contains("older than 2.2.0", t.Verdict));
     }
 
     [Fact]
@@ -423,7 +423,7 @@ public class FirmwareViewModelTests : IDisposable
         Assert.Equal(FlashPhase.Succeeded, fw.Phase);
         Assert.Contains("Nothing was written", fw.ResultText);
         Assert.Contains("MAC", fw.ResultText);
-        Assert.DoesNotContain("2.1.0", fw.DeviceDetail);                 // still the old firmware
+        Assert.DoesNotContain("2.2.0", fw.DeviceDetail);                 // still the old firmware
         Assert.DoesNotContain(_app.Dialogs.Asked, a => a.Contains("Erase"));
     }
 

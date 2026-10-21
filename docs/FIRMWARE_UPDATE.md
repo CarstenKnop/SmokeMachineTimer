@@ -1,6 +1,10 @@
 # Updating the firmware over USB
 
-*How Fog Console puts new firmware on a remote or a timer — and what happens behind the button.*
+*How Fog Console puts new firmware on a remote or a timer over a USB cable — and what happens behind the button.*
+
+> **Timers inside a machine usually have no accessible USB port.** They are updated **over the air through the remote** instead, see
+> [`OTA_UPDATE.md`](OTA_UPDATE.md). The USB route described here is for the remote, for bench work, for the very first installation of the OTA-capable firmware
+> (a timer needs the two-slot layout once) and for recovery.
 
 ![The Firmware page](../PCDiagnostics/docs/firmware-dark.png)
 
@@ -80,26 +84,30 @@ Before anything is written the image itself is checked: ESP32 image header, buil
 
 | Mode | Writes | Keeps | Use it when |
 |------|--------|-------|-------------|
-| **Update** *(default)* | the application | settings, pairing, names, boot loader, partition table | normal updates |
+| **Update** *(default)* | the application and the OTA data (slot 0 boots) | settings, pairing, names, boot loader, partition table | normal updates |
 | **Reinstall** | boot loader, partition table, OTA data, application | settings, pairing, names | the device carried some other firmware before, or a boot loader problem is suspected. Needs a complete firmware (a build folder) |
 | **Clean install** | as *Reinstall*, and **erases the settings** | nothing — the device starts like new | a remote has to forget all timers, or a timer should lose its name and times |
 
 Parts that the flash already contains are **skipped** (the chip calculates an MD5 of each region and the tool compares it), so a second
 update of the same firmware writes nothing and says so. An *Update* also checks the **partition table** of the device first: if it differs
 from the one in the build folder, the boot loader and the partition table are written too — otherwise the new application would not
-fit where the old layout expects it.
+fit where the old layout expects it. That is how a device with the **older single-slot layout** (firmware 2.0) gets the two-slot layout of
+firmware 2.1: its settings and pairing at `0x9000` stay where they are.
 
-Flash map of both firmwares (`huge_app.csv`, 4 MB flash):
+An *Update* always writes **slot 0** and resets the **OTA data**, so the firmware that was just written is the one that starts — also on a
+device that was last updated over the air and ran from slot 1.
+
+Flash map of both firmwares (`partitions/fog_ota.csv`, 4 MB flash):
 
 | Address | Size | Content |
 |--------|------|---------|
 | `0x0000` | 0x8000 | boot loader |
 | `0x8000` | 0x1000 | partition table |
 | `0x9000` | 0x5000 | **NVS: settings, pairing list, counters** |
-| `0xE000` | 0x2000 | OTA data (`boot_app0.bin`) |
-| `0x10000` | 0x300000 | **application** |
-| `0x310000` | 0xE0000 | (unused) |
-| `0x3F0000` | 0x10000 | core dump |
+| `0xE000` | 0x2000 | OTA data (`boot_app0.bin`): which slot boots |
+| `0x10000` | 0x1E0000 | **application, slot 0 (`app0`)** — the USB update writes here |
+| `0x1F0000` | 0x1E0000 | **application, slot 1 (`app1`)** — written by over-the-air updates |
+| `0x3D0000` | 0x10000 | core dump |
 
 ---
 
@@ -149,10 +157,10 @@ output is the reference). Details worth knowing:
 * The same code (`FogConsole/Flashing`) is used by the offline demo against a **simulated ROM** (`SimulatedRom`), which is also what the tests run
   against — including the real esptool (see below).
 
-**Why no over-the-air update through the radio?** Both firmwares use one 3 MB application slot (`huge_app.csv`) and no OTA partition, and the
-remote's firmware (1.3 MB) would not even fit into one of the 1.25 MB slots of the standard OTA layout. Updating ten timers over ESP-NOW would also
-mean a bulk-transfer protocol next to the command protocol that has to stay reliable for the machines. USB is the safe way; a radio update
-could become a later project.
+**Over the air instead of USB?** Timers are usually built into the machines, so their USB ports cannot be reached. For them the PC sends the
+image to the **remote** (which has its USB cable), the remote forwards it by radio to the timer, and the timer writes it into the other slot: see
+[`OTA_UPDATE.md`](OTA_UPDATE.md). The one thing OTA cannot do is install the *first* two-slot firmware on a timer that still has the old single-slot layout:
+that one time needs the USB route above.
 
 ---
 

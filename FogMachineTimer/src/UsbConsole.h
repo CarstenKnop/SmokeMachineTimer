@@ -7,7 +7,7 @@
 #include "FogJsonLine.h"
 #include "FogLog.h"
 
-class UsbConsole {
+class UsbConsole : public Fog::OtaUsbSink {
 public:
     UsbConsole(Fog::TimerNode& node, EspTimerPlatform& platform) : node_(node), plat_(platform) {}
 
@@ -16,10 +16,13 @@ public:
     bool pcPresent(uint32_t nowMs) const { return json_.pcPresent(nowMs); }
     // Reads from Serial; shared with main so a stray boot text does not matter.
     void onFrame(bool tx, const uint8_t* mac, int8_t rssi, const uint8_t* data, size_t len, uint32_t nowMs);
+    // Fog::OtaUsbSink: a reply of the update receiver to a transfer that came over USB
+    void onOtaReply(const uint8_t* payload, size_t len) override;
 
 private:
     void handle(JsonDocument& doc, uint32_t nowMs);
     void handleCmd(JsonDocument& doc, uint32_t id, uint32_t nowMs);
+    void handleOtaTx(JsonDocument& doc, uint32_t id, uint32_t nowMs);
     void sendFleet(uint32_t nowMs);
     void sendRemote(uint32_t nowMs);
     void sendStats(uint32_t nowMs, uint32_t id, bool asResponse);

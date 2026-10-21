@@ -38,7 +38,7 @@ against a simulated radio ([`tools/native-tests`](../tools/native-tests)).
 +------+-----+----+-----+----+-----+--------------+----------+
 ```
 * `net` — network id (default 1). Frames from another network are counted and ignored.
-* `type` — 1 `STATUS`, 2 `PROBE`, 3 `CMD`, 4 `INFO`.
+* `type` — 1 `STATUS`, 2 `PROBE`, 3 `CMD`, 4 `INFO`, 5 `OTA`.
 * `seq` — the sender's frame counter. Gaps in it are how the remote measures **packet loss** of each timer without any extra traffic.
 * `crc16` — CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) over header + payload. (Wi-Fi already protects every frame with a
   32-bit FCS; this CRC guards against foreign ESP-NOW users, truncation and version mix-ups.)
@@ -72,6 +72,14 @@ epoch 0 = any boot, so recovery after a power cut still works.
 ### `INFO` (timer → remote, 100 bytes)
 Reply to `GetInfo`: firmware, reset reason, lifetime reset counts (power-on / brown-out / watchdog / panic / sw), heap, slowest
 loop pass, and all rx/tx/command counters of the timer. This is the timer half of the performance counters.
+
+### `OTA` (both directions, firmware update, firmware 2.1+)
+A transfer protocol of its own on top of the same frame: `[op][session][body]`. The PC sends `Begin` / `Data` / `Poll` / `Verify` /
+`Activate` / `Abort` (through the remote, which only forwards them to a paired timer, one frame at a time, after any due `CMD`), the timer
+answers with `State` frames (what it has, what is missing, erase/verify progress, errors). The timer writes the application slot that is not
+running, checks its SHA-256, and the boot loader switches slot (with rollback). Everything — frame layouts, selective acknowledgement,
+timings, safety, test vectors — is in [`OTA_UPDATE.md`](OTA_UPDATE.md). While the PC is updating, the remote keeps the radio on the
+home channel (no discovery, recovery sweeps, channel moves or link tests).
 
 ## Delivery of a command (remote)
 
@@ -139,11 +147,14 @@ remote knows its fleet within ~0.3 s (it also broadcasts a probe immediately).
 | max attempts | 16 | per command |
 | TX watchdog | 120 / 150 ms | radio / link: lost send callback |
 | recovery | 8 s → 120 s | auto-recovery back-off |
+| update queue / hold | 8 frames / 15 s | remote's bridge for `OTA` frames; radio hold that ends 15 s after the last update frame |
+| update erase | 1 sector / 20 ms | timer erases its new slot gently, so the cycle and the heartbeats keep running |
+| update silence | 30 s | a transfer with no frame for this long is dropped by the timer |
 
 ## Verification
 
 `tools/native-tests` runs the **real** `TimerNode` and `RemoteLink` code against a simulated medium (loss, burst loss, MAC
-retries with lost ACKs, power cuts, channel changes, `millis()` wrap) — 198 checks: all ten timers visible within 1.5 s,
+retries with lost ACKs, power cuts, channel changes, `millis()` wrap) — 524 checks (198 for the protocol described above, the rest for the firmware update, see [`OTA_UPDATE.md`](OTA_UPDATE.md)): all ten timers visible within 1.5 s,
 no command executed twice under 40 % loss, stale commands never run after a power cut, dead-man lease holds under loss and
 expires without the remote, migration commits/aborts correctly, a late timer on the old channel is brought home, idle remote
 sends nothing. Run it with `powershell -File tools/native-tests/run.ps1`.

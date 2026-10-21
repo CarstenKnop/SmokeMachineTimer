@@ -51,6 +51,7 @@ const char* typeName(uint8_t type) {
         case Type::Probe:  return "PROBE";
         case Type::Cmd:    return "CMD";
         case Type::Info:   return "INFO";
+        case Type::Ota:    return "OTA";
     }
     return "?";
 }

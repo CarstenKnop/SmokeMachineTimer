@@ -133,6 +133,7 @@ public static class ProtocolParser
                 root.Long("seq"), root.Str("hex")),
             "stats" => new StatsMessage(ParseStats(root)),
             "devStat" => new DevStatMessage(ParseDevStat(root)),
+            "otaRx" => ParseOtaRx(root),
             _ => new UnknownMessage(t, root.Clone()),
         };
     }
@@ -162,6 +163,7 @@ public static class ProtocolParser
             Err = r.TryGet("err", out _) ? r.Str("err") : null,
             Msg = r.TryGet("msg", out _) ? r.Str("msg") : null,
             Queued = r.NullableInt("queued"),
+            Acked = r.NullableBool("acked"),
             DeviceMs = r.TryGet("ms", out _) ? r.Long("ms") : null,
             Hello = hello,
             Settings = settings,
@@ -174,7 +176,29 @@ public static class ProtocolParser
     public static HelloInfo ParseHello(JsonElement r) => new(
         r.Str("kind") switch { "remote" => DeviceKind.Remote, "timer" => DeviceKind.Timer, _ => DeviceKind.Unknown },
         r.Str("fw"), r.Int("proto"), r.Str("mac").ToUpperInvariant(), r.Str("name"), r.Int("ch"), r.Int("net"),
-        r.Long("upMs"), r.Str("rst"), r.Int("boots"), r.Long("heap"), r.Str("build"), r.Int("maxDevs", 10));
+        r.Long("upMs"), r.Str("rst"), r.Int("boots"), r.Long("heap"), r.Str("build"), r.Int("maxDevs", 10), ParseStringArray(r, "caps"));
+
+    private static IReadOnlyList<string>? ParseStringArray(JsonElement r, string name)
+    {
+        if (r.Arr(name) is not { } a) return null;
+        var list = new List<string>();
+        foreach (var e in a.EnumerateArray())
+            if (e.ValueKind == JsonValueKind.String && e.GetString() is { Length: > 0 } s) list.Add(s);
+        return list;
+    }
+
+    private static Message ParseOtaRx(JsonElement r)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(r.Str("d"));
+            return new OtaRxMessage(r.Int("dev"), r.Str("mac").ToUpperInvariant(), r.Int("rssi"), bytes);
+        }
+        catch (FormatException)
+        {
+            return new UnknownMessage("otaRx", r.Clone());      // damaged base64: keep it visible in the Raw console, never throw
+        }
+    }
 
     public static RemoteSettings ParseSettings(JsonElement s) => new()
     {

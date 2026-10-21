@@ -46,6 +46,52 @@
             </Border>
         </DataTemplate>
 
+        <!-- one timer in the over-the-air list -->
+        <DataTemplate x:Key="OtaRowTemplate" DataType="{x:Type vm:OtaTimerRow}">
+            <Border Style="{StaticResource Fog.Tile}" Margin="0,0,0,8" Padding="14,10">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,10,0"
+                                  IsEnabled="{Binding DataContext.Ota.IsBusy, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={x:Static cv:Conv.Not}}"
+                                  AutomationProperties.Name="Update this timer"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Mac}" Style="{StaticResource Fog.MonoDim}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="3" Text="{Binding Version}" Style="{StaticResource Fog.Mono}" VerticalAlignment="Center" ToolTip="Firmware version the timer reports"/>
+                        <Border Grid.Column="4" Style="{StaticResource Fog.Chip}" Margin="0,0,8,0" VerticalAlignment="Center"
+                                Background="{cv:ToneBrush Path=OnlineLevel, Part=Bg}" BorderBrush="{cv:ToneBrush Path=OnlineLevel, Part=Border}">
+                            <TextBlock Text="{Binding OnlineText}" Style="{StaticResource Fog.ChipText}" Foreground="{cv:ToneBrush Path=OnlineLevel}"/>
+                        </Border>
+                        <Border Grid.Column="5" Style="{StaticResource Fog.Chip}" HorizontalAlignment="Left" VerticalAlignment="Center" ToolTip="{Binding SupportTooltip}"
+                                Background="{cv:ToneBrush Path=SupportLevel, Part=Bg}" BorderBrush="{cv:ToneBrush Path=SupportLevel, Part=Border}">
+                            <TextBlock Text="{Binding SupportText}" Style="{StaticResource Fog.ChipText}" Foreground="{cv:ToneBrush Path=SupportLevel}"/>
+                        </Border>
+                    </Grid>
+                    <StackPanel Margin="0,10,0,0" Visibility="{Binding ShowProgress, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                        <Grid>
+                            <TextBlock Text="{Binding Stage}" Style="{StaticResource Fog.Body}"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Text="{Binding ResentText}" Style="{StaticResource Fog.Caption}" Margin="0,0,14,0"/>
+                                <TextBlock Text="{Binding SpeedText}" Style="{StaticResource Fog.MonoDim}" Margin="0,0,14,0"/>
+                                <TextBlock Text="{Binding EtaText}" Style="{StaticResource Fog.Caption}"/>
+                            </StackPanel>
+                        </Grid>
+                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding Fraction, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate}" Height="6" Margin="0,6,0,0"
+                                     AutomationProperties.Name="Progress of this timer"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ResultText}" TextWrapping="Wrap" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{cv:ToneBrush Path=ResultLevel}"
+                               Visibility="{Binding HasResult, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="ModeRadio" TargetType="RadioButton">
             <Setter Property="Margin" Value="0,0,0,12"/>
             <Setter Property="VerticalContentAlignment" Value="Top"/>
@@ -56,10 +102,30 @@
         <StackPanel Margin="24,18,24,28" MaxWidth="1200" HorizontalAlignment="Stretch">
             <TextBlock Text="Firmware" Style="{StaticResource Fog.PageTitle}"/>
             <TextBlock Style="{StaticResource Fog.PageSubtitle}"
-                       Text="Update the remote or a timer over its USB cable. The device is put into its ROM bootloader automatically, written, checked and restarted. This page never uses the radio: every device is updated on its own cable."/>
+                       Text="Update the remote or a timer over its USB cable (put into its ROM bootloader automatically, written, checked and restarted), or update the timers over the air through the remote while they stay inside their machines."/>
+
+            <!-- how the firmware gets to the device -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                <RadioButton GroupName="Route" Style="{StaticResource Fog.ToggleButton}" IsChecked="{Binding IsUsbRoute, Mode=TwoWay}" Padding="18,9" Margin="0,0,6,0"
+                             IsEnabled="{Binding ChoicesEnabled}" AutomationProperties.Name="Update over the USB cable"
+                             ToolTip="Flash the remote or a timer through its own USB cable (the chip's ROM bootloader)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE88E;" Style="{StaticResource Fog.Icon}" FontSize="15" Margin="0,0,9,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                        <TextBlock Text="USB cable" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton GroupName="Route" Style="{StaticResource Fog.ToggleButton}" IsChecked="{Binding IsOtaRoute, Mode=TwoWay}" Padding="18,9"
+                             IsEnabled="{Binding ChoicesEnabled}" AutomationProperties.Name="Update timers over the air"
+                             ToolTip="Update the timers through the remote's radio, without opening the machines (needs the remote connected by USB)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE701;" Style="{StaticResource Fog.Icon}" FontSize="15" Margin="0,0,9,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                        <TextBlock Text="Over the air (through the remote)" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                    </StackPanel>
+                </RadioButton>
+            </StackPanel>
 
             <!-- 1. device -->
-            <Border Style="{StaticResource Fog.Card}">
+            <Border Style="{StaticResource Fog.Card}" Visibility="{Binding IsUsbRoute, Converter={x:Static cv:Conv.BoolToVisibility}}">
                 <StackPanel>
                     <TextBlock Text="1  ·  Device" Style="{StaticResource Fog.Subtitle}"/>
                     <Grid Margin="0,12,0,0">
@@ -94,12 +160,15 @@
             <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0">
                 <StackPanel>
                     <Grid>
-                        <TextBlock Text="2  ·  Firmware" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                        <TextBlock Text="2  ·  Firmware" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"
+                                   Visibility="{Binding IsUsbRoute, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                        <TextBlock Text="1  ·  Firmware" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"
+                                   Visibility="{Binding IsOtaRoute, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button Style="{StaticResource Fog.Button.Small}" Content="Choose file..." Padding="12,5" Margin="0,0,6,0" Command="{Binding BrowseFileCommand}"
-                                    IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" ToolTip="Pick a firmware .bin file (an application image, or a merged image)"/>
+                                    IsEnabled="{Binding ChoicesEnabled}" ToolTip="Pick a firmware .bin file (an application image, or a merged image)"/>
                             <Button Style="{StaticResource Fog.Button.Small}" Content="Choose folder..." Padding="12,5" Command="{Binding BrowseFolderCommand}"
-                                    IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" ToolTip="Pick a PlatformIO build folder (firmware.bin, bootloader.bin, partitions.bin)"/>
+                                    IsEnabled="{Binding ChoicesEnabled}" ToolTip="Pick a PlatformIO build folder (firmware.bin, bootloader.bin, partitions.bin)"/>
                         </StackPanel>
                     </Grid>
                     <Border Style="{StaticResource Fog.Tile}" Margin="0,12,0,0" Padding="14,12"
@@ -110,7 +179,7 @@
                     <ListBox Margin="0,12,0,0" ItemsSource="{Binding Choices}" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource ChoiceTemplate}"
                              ItemContainerStyle="{StaticResource Fog.PlainListItem}" BorderThickness="0" Background="Transparent" Focusable="True"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                             IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" AutomationProperties.Name="Available firmware"
+                             IsEnabled="{Binding ChoicesEnabled}" AutomationProperties.Name="Available firmware"
                              Visibility="{Binding HasChoices, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
                     <TextBlock Text="{Binding CatalogNote}" TextWrapping="Wrap" TextTrimming="None" Foreground="{DynamicResource Fog.Warn}" Margin="0,4,0,0">
                         <TextBlock.Style>
@@ -124,6 +193,7 @@
                 </StackPanel>
             </Border>
 
+            <StackPanel Visibility="{Binding IsUsbRoute, Converter={x:Static cv:Conv.BoolToVisibility}}">
             <Grid Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -261,6 +331,88 @@
                     </ItemsControl>
                 </StackPanel>
             </Border>
+            </StackPanel>
+
+            <!-- ===== over the air ===== -->
+            <StackPanel Visibility="{Binding IsOtaRoute, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                <Border Margin="0,14,0,0" Padding="14,10" CornerRadius="8" BorderThickness="1" Background="{DynamicResource Fog.WarnSoft}" BorderBrush="{DynamicResource Fog.Warn}"
+                        Visibility="{Binding Ota.IsBlocked, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Why an update cannot start">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7BA;" Style="{StaticResource Fog.Icon}" Foreground="{DynamicResource Fog.Warn}" FontSize="16" Margin="0,0,10,0" VerticalAlignment="Top"/>
+                        <TextBlock Text="{Binding Ota.BlockedText}" TextWrapping="Wrap" Foreground="{DynamicResource Fog.Warn}" MaxWidth="1000"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 2. timers -->
+                <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="2  ·  Timers" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Style="{StaticResource Fog.Button.Small}" Content="Outdated" Padding="12,5" Margin="0,0,6,0" Command="{Binding Ota.SelectOutdatedCommand}"
+                                        IsEnabled="{Binding Ota.IsBusy, Converter={x:Static cv:Conv.Not}}" ToolTip="Tick the online timers that run an older version than the chosen firmware"/>
+                                <Button Style="{StaticResource Fog.Button.Small}" Content="All" Padding="12,5" Margin="0,0,6,0" Command="{Binding Ota.SelectAllCommand}"
+                                        IsEnabled="{Binding Ota.IsBusy, Converter={x:Static cv:Conv.Not}}"/>
+                                <Button Style="{StaticResource Fog.Button.Small}" Content="None" Padding="12,5" Margin="0,0,14,0" Command="{Binding Ota.SelectNoneCommand}"
+                                        IsEnabled="{Binding Ota.IsBusy, Converter={x:Static cv:Conv.Not}}"/>
+                                <Button Style="{StaticResource Fog.Button.Small}" Content="Check support" Padding="12,5" Command="{Binding Ota.CheckSupportCommand}"
+                                        ToolTip="Ask the ticked timers (all when none is ticked) whether they can receive a firmware over the air. Nothing is changed on them."
+                                        AutomationProperties.Name="Check over-the-air support"/>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None" Margin="0,4,0,10"
+                                   Text="The timers are updated one after another. A timer must be online; a machine that is heating up has no power and cannot take part. Each timer keeps its old firmware until the new one is checked and activated."/>
+                        <Border Style="{StaticResource Fog.Tile}" Padding="14,12" Visibility="{Binding Ota.HasRows, Converter={x:Static cv:Conv.InverseBoolToVisibility}}">
+                            <TextBlock Style="{StaticResource Fog.DimBody}" Text="No timers are paired (or the remote is not connected)."/>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding Ota.Rows}" ItemTemplate="{StaticResource OtaRowTemplate}" Focusable="False"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 3. update -->
+                <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0">
+                    <StackPanel>
+                        <TextBlock Text="3  ·  Update" Style="{StaticResource Fog.Subtitle}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button Style="{StaticResource Fog.Button.Accent}" Padding="26,11" FontSize="14" Command="{Binding Ota.UpdateCommand}" AutomationProperties.Name="Update selected timers">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE701;" Style="{StaticResource Fog.Icon}" FontSize="16" Margin="0,0,10,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <TextBlock Text="{Binding Ota.UpdateButtonText}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource Fog.Button}" Content="Cancel" Padding="20,11" Margin="10,0,0,0" Command="{Binding Ota.CancelCommand}"
+                                    Visibility="{Binding Ota.IsBusy, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Cancel the update"
+                                    ToolTip="Stops the transfer. The timers keep their old firmware."/>
+                            <TextBlock Text="{Binding Ota.StageText}" Style="{StaticResource Fog.Caption}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                        </StackPanel>
+                        <Border Margin="0,16,0,0" Padding="14,10" CornerRadius="8" BorderThickness="1"
+                                Background="{cv:ToneBrush Path=Ota.SummaryLevel, Part=Bg}" BorderBrush="{cv:ToneBrush Path=Ota.SummaryLevel, Part=Border}"
+                                Visibility="{Binding Ota.HasSummary, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Result of the update">
+                            <TextBlock Text="{Binding Ota.SummaryText}" TextWrapping="Wrap" Foreground="{cv:ToneBrush Path=Ota.SummaryLevel}" FontWeight="SemiBold" LineHeight="20"/>
+                        </Border>
+                        <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None" Margin="0,14,0,0"
+                                   Text="A timer keeps cycling during the transfer. At the end it restarts for a moment (its output is off); a new firmware that does not start properly is replaced by the old one automatically. Hold-to-fog and the other commands keep working, but a timer that loses power ends its transfer, which is then started again. Details: docs/OTA_UPDATE.md."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- log -->
+                <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0" Visibility="{Binding Ota.HasLog, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Log" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Fog.Button.Small}" Content="Copy" HorizontalAlignment="Right" Padding="12,4" Command="{Binding Ota.CopyLogCommand}"
+                                    ToolTip="Copy the log to the clipboard" AutomationProperties.Name="Copy the log"/>
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding Ota.LogLines}" Margin="0,10,0,0" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Style="{StaticResource Fog.Mono}" FontSize="12" TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

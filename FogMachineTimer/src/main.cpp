@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 
+#include "EspOtaTarget.h"
 #include "EspTimerPlatform.h"
 #include "FogIdent.h"
 #include "FogJsonLine.h"
@@ -25,11 +26,17 @@ static TimerNode node(platform);
 static UsbConsole console(node, platform);
 static bool outputState = false;
 static BootRecord bootRecord;
+static bool imageConfirmed = false;
+static constexpr uint32_t kConfirmImageMs = 6000;      // healthy this long: a freshly updated image is accepted
 
 static void driveOutput(bool on) {
     outputState = on;
     digitalWrite(FOG_OUTPUT_GPIO, (on == (FOG_OUTPUT_ACTIVE_HIGH != 0)) ? HIGH : LOW);
 }
+
+// Arduino core hook: a freshly updated image starts in the boot loader's "pending verify" state and is confirmed by loop() below after a few
+// seconds of healthy running (EspOtaTarget::confirmRunningImage). A reset before that rolls back to the previous firmware.
+extern "C" bool verifyRollbackLater() { return true; }
 
 void setup() {
     // 1. Safe output level first - before USB, flash or radio.
@@ -54,6 +61,8 @@ void setup() {
     platform.begin(settings, 80);
     platform.tap = [](bool tx, const uint8_t* mac, int8_t rssi, const uint8_t* d, size_t n) { console.onFrame(tx, mac, rssi, d, n, millis()); };
     node.begin(millis(), settings, platform.life.boots);
+    node.deferOtaTick(true);                          // flash work happens after the output pin was written (see loop)
+    platform.onQuiesce = []() { driveOutput(false); };
     console.begin();
 
     // 4. Watchdog on the loop task: a stalled loop resets the chip (the output is off after any reset).
@@ -78,9 +87,11 @@ void loop() {
 
     const bool want = node.outputOn(now);
     if (want != outputState) driveOutput(want);
+    node.tickOta(now);                    // firmware update: may block for one flash sector erase (about 45 ms)
 
     platform.updateLed(now, node, node.settings().led != 0);
     console.loop(now);
+    if (!imageConfirmed && now > kConfirmImageMs) { imageConfirmed = true; EspOtaTarget::confirmRunningImage(); }
     if (bootRecord.dirty && now > 3000) commitBoot("fogtimer", bootRecord);   // not while a returning supply may still be chattering
     if (platform.rebootDue()) { driveOutput(false); delay(20); ESP.restart(); }
     delay(1);

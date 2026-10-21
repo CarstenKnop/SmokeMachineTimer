@@ -4,6 +4,11 @@
 // Pure C++ (hardware reached through RemotePort) so it is exercised on a PC against simulated
 // timers with packet loss and power cuts. Single-threaded: call everything from the main loop.
 //
+// Firmware update (docs/OTA_UPDATE.md): the link only bridges Type::Ota frames between the PC and a paired timer. submitOta() queues
+// one frame (8 at most, sent in order, one at a time, after any due command), onOtaFrame() hands back what a timer sent. While the PC
+// keeps updating, the radio is "held": nothing that leaves the home channel or floods it is started (discovery, recovery, channel
+// move, link test); the hold ends by itself 15 s after the last submitOta()/setOtaHold(true).
+//
 // Delivery model (see docs/RADIO_PROTOCOL.md):
 //   * a command is a short-lived *job*; it is (re)sent until the timer echoes its command id in a STATUS,
 //     or its time budget runs out - after that it is discarded and never runs late;
@@ -96,6 +101,7 @@ struct RemoteCounters {
     uint32_t cmds = 0, cmdsOk = 0, cmdsTimeout = 0, cmdsRejected = 0, retries = 0;
     uint32_t rttSumMs = 0, rttCount = 0, rttMax = 0;
     uint32_t sweeps = 0, recovers = 0, found = 0, migrations = 0;
+    uint32_t otaTx = 0, otaTxAcked = 0, otaRx = 0, otaQueueFull = 0;
     uint32_t chTx[kMaxChannel + 1] = {0}, chFail[kMaxChannel + 1] = {0}, chRx[kMaxChannel + 1] = {0};
 };
 
@@ -122,6 +128,10 @@ public:
     virtual void onHomeChannel(uint8_t /*ch*/) {}      // caller should persist
     virtual void onLog(const char* /*msg*/) {}
     virtual void onRemoved(int /*dev*/) {}              // a timer was removed; higher indices shifted down
+    // Firmware update frames. onOtaTx: the frame queued with submitOta(tag) was sent (sent) and the timer's radio acknowledged it (acked);
+    // sent=false: it was dropped without being sent (the timer was removed). onOtaFrame: a Type::Ota payload from paired timer dev.
+    virtual void onOtaTx(uint32_t /*tag*/, bool /*sent*/, bool /*acked*/) {}
+    virtual void onOtaFrame(int /*dev*/, int8_t /*rssi*/, const uint8_t* /*payload*/, size_t /*len*/) {}
 };
 
 class RemoteLink {
@@ -132,6 +142,8 @@ public:
     static constexpr uint32_t kTxWatchdogMs = 150;
     static constexpr uint32_t kDefaultTtlMs = 2500;
     static constexpr uint8_t kMaxAttempts = 16;
+    static constexpr int kOtaQueue = 8;
+    static constexpr uint32_t kOtaHoldMs = 15000;
 
     enum : uint32_t { TagNone = 0, TagMigrate = 0x10000, TagRecover = 0x20000, TagInfo = 0x30000 };
 
@@ -181,12 +193,12 @@ public:
 
     // ---- activities ----
     void probeNow();                                   // broadcast "send STATUS" on the home channel
-    void startDiscovery(bool sweepChannels);
+    bool startDiscovery(bool sweepChannels);          // false: refused (firmware update running)
     void stopDiscovery();
     bool discovering() const { return discovery_; }
     int heardCount() const { return kMaxHeard; }
     const Heard& heard(int i) const { return heard_[i]; }
-    void startRecover(int dev);                        // dev<0: every offline timer
+    bool startRecover(int dev);                        // dev<0: every offline timer; false: refused (firmware update running)
     bool startMigrate(uint8_t ch, bool force);
     bool migrating() const { return mig_.active; }
     bool startLinkTest(int dev, uint16_t count, uint16_t gapMs);
@@ -197,6 +209,13 @@ public:
     void setCmdSeq(uint8_t v) { cmdSeq_ = v; }
     bool busyExcursion() const { return exc_.kind != Exc::None; }
     int queuedJobs() const;
+
+    // ---- firmware update bridge ----
+    enum class OtaSubmit : uint8_t { Ok, Full, BadDevice, TooLong };
+    OtaSubmit submitOta(int dev, const uint8_t* payload, size_t len, uint32_t tag);
+    void setOtaHold(bool on);                          // on: (re)start the 15 s hold, off: release it
+    bool otaHeld() const { return otaHoldUntil_ != 0 && static_cast<int32_t>(now_ - otaHoldUntil_) < 0; }
+    int otaQueued() const { return otaCount_; }
 
     const RemoteCounters& counters() const { return cnt_; }
     void resetCounters();
@@ -215,6 +234,13 @@ private:
         uint8_t channel = 0;           // 0 = home channel, else only sent while parked on that channel
         uint32_t tag = 0;
         uint32_t created = 0, deadline = 0, nextSend = 0, firstSent = 0;
+    };
+    struct OtaItem {
+        bool inFlight = false;
+        int8_t dev = -1;
+        uint8_t len = 0;
+        uint8_t data[kMaxPayload] = {0};
+        uint32_t tag = 0;
     };
     enum class Exc : uint8_t { None, Discover, Find };
     struct Excursion {
@@ -263,6 +289,8 @@ private:
     void tickDiscovery(uint32_t now);
     void tickAutoRecover(uint32_t now);
     void tickLinkTest(uint32_t now);
+    bool trySendOta(uint32_t now);
+    void dropOta(int index, bool sent, bool acked);
     void beginExcursion(Exc kind, uint32_t now);
     void endExcursion(uint32_t now);
     void buildChannelList(int dev);
@@ -292,7 +320,7 @@ private:
     uint32_t txStart_ = 0;
     uint16_t txJob_ = 0;                 // job id in flight (0 = none)
     bool txUnicast_ = false;
-    enum class TxKind : uint8_t { None, Job, Find, LinkTest, Other } txKind_ = TxKind::None;
+    enum class TxKind : uint8_t { None, Job, Find, LinkTest, Other, Ota } txKind_ = TxKind::None;
     uint32_t lastTxDone_ = 0;
     int8_t txDev_ = -1;
     uint8_t txCh_ = 0;
@@ -308,6 +336,9 @@ private:
     Migrate mig_;
     LinkTest lt_;
     bool probePending_ = false;
+    OtaItem ota_[kOtaQueue];
+    int otaCount_ = 0;
+    uint32_t otaHoldUntil_ = 0;
     uint32_t bootMs_ = 0;
     RemoteCounters cnt_;
 };

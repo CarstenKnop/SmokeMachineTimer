@@ -9,6 +9,7 @@ void EspTimerPlatform::begin(const TimerSettings& s, int8_t txPowerQdbm) {
     if (!radio.begin(s.channel, txPowerQdbm)) {
         FLOGE("radio", "ESP-NOW init failed");
     }
+    ota.begin();
 #if FOG_STATUS_LED_GPIO >= 0
     pinMode(FOG_STATUS_LED_GPIO, OUTPUT);
     digitalWrite(FOG_STATUS_LED_GPIO, LOW);
@@ -64,6 +65,8 @@ void EspTimerPlatform::updateLed(uint32_t nowMs, TimerNode& node, bool ledEnable
     (void)ledEnabled;
 #endif
 }
+
+void EspTimerPlatform::log(const char* msg) { FLOGI("ota", "%s", msg); }
 
 void EspTimerPlatform::fillInfo(InfoPayload& info) {
     info.resetReason = resetReason;

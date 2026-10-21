@@ -311,6 +311,62 @@ internal static class ScreenshotScript
                     vm.Toasts.Toasts.Clear();
                     break;
                 }
+            case "otaready":
+            case "otaprogress":
+            case "otadone":
+            case "otafail":
+                {
+                    // the over-the-air route of the Firmware page, with the demo images only (no paths of this machine in the picture)
+                    vm.Firmware.AppDirectory = Path.GetTempPath();
+                    vm.Navigate(NavPage.Firmware);
+                    await vm.Firmware.RefreshAllCommand.ExecuteAsync(null);
+                    vm.Firmware.Selected = vm.Firmware.Choices.FirstOrDefault(c => c.Set.Kind == Flashing.FirmwareKind.Timer) ?? vm.Firmware.Selected;
+                    vm.Firmware.Route = ViewModels.UpdateRoute.Ota;
+                    var ota = vm.Firmware.Ota;
+                    ota.Refresh();
+                    await ota.CheckSupportCommand.ExecuteAsync(null);              // every row learns what it can do
+                    if (action == "otaready")
+                    {
+                        ota.SelectOutdatedCommand.Execute(null);
+                        break;
+                    }
+
+                    async Task<bool> WaitFor(Func<bool> condition, int seconds)
+                    {
+                        for (int i = 0; i < seconds * 20 && !condition(); i++) await Task.Delay(50);
+                        return condition();
+                    }
+
+                    ota.SelectNoneCommand.Execute(null);
+                    // the first timers that are online and can take part (some machines of the demo are heating up at any moment)
+                    var rows = ota.Rows.Where(r => r.Online && r.Support == Ota.OtaSupport.Capable).ToList();
+                    if (action == "otafail")
+                    {
+                        // the machine of the second timer heats up (power cut) in the middle of its transfer
+                        ota.TransferOptions = new Ota.OtaTransferOptions { OfflineGiveUpMs = 3000, MaxRestarts = 0 };
+                        foreach (var r in rows.Take(3)) r.IsChecked = true;
+                        _ = ota.UpdateCommand.ExecuteAsync(null);
+                        await WaitFor(() => rows[1].IsRunning && rows[1].Fraction > 0.35 && rows[1].Stage.StartsWith("Sending"), 40);
+                        vm.Sim.CutPower(rows[1].Index, 90);
+                        await WaitFor(() => rows[1].HasResult && rows[2].IsRunning && rows[2].Fraction > 0.3 && rows[2].Stage.StartsWith("Sending"), 60);
+                        vm.Toasts.Toasts.Clear();
+                        break;
+                    }
+
+                    foreach (var r in rows.Take(2)) r.IsChecked = true;
+                    if (action == "otaprogress")
+                    {
+                        _ = ota.UpdateCommand.ExecuteAsync(null);
+                        await WaitFor(() => rows[0].HasResult && rows[1].IsRunning && rows[1].Fraction > 0.55 && rows[1].Stage.StartsWith("Sending"), 60);
+                        vm.Toasts.Toasts.Clear();
+                        break;
+                    }
+                    await ota.UpdateCommand.ExecuteAsync(null);                    // otadone: both finished
+                    await Task.Delay(1500);                                        // the fleet shows the new versions
+                    ota.Refresh();
+                    vm.Toasts.Toasts.Clear();
+                    break;
+                }
             case "forceon":
                 vm.Fleet.Devices.FirstOrDefault(d => d.Online)?.HoldStartCommand.Execute(null);
                 await Task.Delay(800);

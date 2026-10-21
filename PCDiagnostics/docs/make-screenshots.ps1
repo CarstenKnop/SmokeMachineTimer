@@ -20,6 +20,7 @@ $shots = @(
     @("Diagnostics", "diagnostics", "--no-chaos",                               22),
     @("Console",     "console",     "--action console",                          3),
     @("Firmware",    "firmware",    "--paired 10 --no-chaos --action firmware",   8),
+    @("Firmware",    "firmware-ota", "--paired 10 --no-chaos --action otaready",   10),
     @("Settings",    "settings",    "",                                          6)
 )
 
@@ -48,7 +49,10 @@ $extras = @(
     @("packets",         "Console",     "--action packets",                                    8),
     @("raw",             "Console",     "--action raw",                                        6),
     @("firmware-flashing", "Firmware",  "--paired 10 --no-chaos --action firmwareflash",       8),
-    @("firmware-done",   "Firmware",    "--paired 10 --no-chaos --action firmwaredone",        10)
+    @("firmware-done",   "Firmware",    "--paired 10 --no-chaos --action firmwaredone",        10),
+    @("firmware-ota-progress", "Firmware", "--paired 10 --no-chaos --action otaprogress --scroll 440",      10),
+    @("firmware-ota-done", "Firmware",  "--paired 10 --no-chaos --action otadone --scroll 440",             10),
+    @("firmware-ota-fail", "Firmware",  "--paired 10 --no-chaos --action otafail --scroll 440",             10)
 )
 foreach ($s in $extras) {
     if ($Only -ne "" -and $s[0] -notlike "*$Only*") { continue }

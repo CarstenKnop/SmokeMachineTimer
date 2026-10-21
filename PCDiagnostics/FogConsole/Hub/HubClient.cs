@@ -2,6 +2,7 @@ using System.IO;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FogConsole.Protocol;
 using FogConsole.Transport;
 
@@ -13,7 +14,7 @@ namespace FogConsole.Hub;
 /// (including automatic re-connection when the port vanishes).
 /// Events are raised on background threads; the UI layer marshals them.
 /// </summary>
-public sealed class HubClient : IAsyncDisposable
+public sealed partial class HubClient : IAsyncDisposable
 {
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly ConcurrentDictionary<int, TaskCompletionSource<ResponseMessage>> _pending = new();
@@ -422,7 +423,7 @@ public sealed class HubClient : IAsyncDisposable
             throw new HubDisconnectedException("Write failed: " + ex.Message, ex);
         }
         Counters.Tx();
-        RaiseRaw(RawDirection.Tx, RawKind.Json, line);
+        RaiseRaw(RawDirection.Tx, RawKind.Json, ShortenOta(line));
     }
 
     /// <summary>Sends a line exactly as given (Raw console); the answer shows up in the raw log.</summary>
@@ -524,7 +525,7 @@ public sealed class HubClient : IAsyncDisposable
                 RaiseRaw(RawDirection.Rx, p.MalformedJson ? RawKind.MalformedJson : RawKind.PlainText, line);
                 break;
             default:
-                RaiseRaw(RawDirection.Rx, RawKind.Json, line);
+                RaiseRaw(RawDirection.Rx, RawKind.Json, ShortenOta(line));
                 break;
         }
 
@@ -541,6 +542,19 @@ public sealed class HubClient : IAsyncDisposable
 
         try { MessageReceived?.Invoke(msg); }
         catch { /* subscriber bug must not kill the reader */ }
+    }
+
+    [GeneratedRegex("\"d\":\"([A-Za-z0-9+/=]{24,})\"")]
+    private static partial Regex OtaDataRegex();
+
+    /// <summary>
+    /// A firmware transfer is thousands of lines of base64. The Raw console shows them with the data cut short
+    /// (<c>"d":"AUKIEwAANDmL...(228 bytes)"</c>) so that it stays readable and cheap; what goes over the wire is unchanged.
+    /// </summary>
+    internal static string ShortenOta(string line)
+    {
+        if (line.Length < 80 || !(line.Contains("\"otaTx\"", StringComparison.Ordinal) || line.Contains("\"otaRx\"", StringComparison.Ordinal))) return line;
+        return OtaDataRegex().Replace(line, m => $"\"d\":\"{m.Groups[1].Value[..16]}...({m.Groups[1].Length * 3 / 4} bytes)\"");
     }
 
     private void RaiseRaw(RawDirection dir, RawKind kind, string text)

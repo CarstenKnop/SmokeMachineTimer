@@ -70,10 +70,11 @@ public static class DemoFirmware
             Bootloader = complete ? CreateImage(FirmwareKind.Unknown, "boot", 19_000, seed: 7) : null,
             PartitionTableBin = complete ? CreatePartitionTable() : null,
             BootApp0 = complete ? CreateBootApp0() : null,
+            HasOtaData = complete,
         };
     }
 
-    /// <summary>The partition table of the project (huge_app.csv): settings at 0x9000, application at 0x10000.</summary>
+    /// <summary>The partition table of the project (partitions/fog_ota.csv): settings at 0x9000, OTA data, two application slots.</summary>
     public static byte[] CreatePartitionTable()
     {
         var table = new byte[PartitionTable.MaxLength];
@@ -96,9 +97,9 @@ public static class DemoFirmware
 
         Add("nvs", 0x01, 0x02, 0x9000, 0x5000);
         Add("otadata", 0x01, 0x00, 0xE000, 0x2000);
-        Add("app0", 0x00, 0x10, 0x10000, 0x300000);
-        Add("spiffs", 0x01, 0x82, 0x310000, 0xE0000);
-        Add("coredump", 0x01, 0x03, 0x3F0000, 0x10000);
+        Add("app0", 0x00, 0x10, 0x10000, 0x1E0000);
+        Add("app1", 0x00, 0x11, 0x1F0000, 0x1E0000);
+        Add("coredump", 0x01, 0x03, 0x3D0000, 0x10000);
 
         // MD5 entry that ends the table
         table[pos] = 0xEB;

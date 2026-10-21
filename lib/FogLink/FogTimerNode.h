@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "FogCycle.h"
 #include "FogLinkStats.h"
+#include "FogOta.h"
 #include "FogProto.h"
 
 namespace Fog {
@@ -33,11 +34,22 @@ public:
     virtual void fillInfo(InfoPayload& info) = 0;       // platform-owned fields (heap, counters, reset reason)
     virtual uint32_t random(uint32_t exclusiveMax) = 0;
     virtual void log(const char* msg) { (void)msg; }
+    // Over-the-air update (docs/OTA_UPDATE.md): the slot that is not running, or nullptr when the platform has none.
+    virtual OtaTarget* otaTarget() { return nullptr; }
+    // Drive the output off right now: the next step (activating a new image) blocks the loop for about a second.
+    virtual void quiesceOutput() {}
 };
 
-class TimerNode {
+// Receives the replies of an update transfer that arrived over USB instead of the radio.
+class OtaUsbSink {
 public:
-    TimerNode(TimerPlatform& platform) : plat_(platform) {}
+    virtual ~OtaUsbSink() {}
+    virtual void onOtaReply(const uint8_t* payload, size_t len) = 0;
+};
+
+class TimerNode : private OtaIo {
+public:
+    TimerNode(TimerPlatform& platform) : plat_(platform), ota_(*this) {}
 
     // Call once after the radio is up. bootCount comes from persistent storage.
     void begin(uint32_t nowMs, const TimerSettings& settings, uint32_t bootCount);
@@ -48,7 +60,17 @@ public:
     // Must be called every loop iteration.
     void tick(uint32_t nowMs);
 
-    bool outputOn(uint32_t nowMs) const { return engine_.outputOn(nowMs); }
+    // Over-the-air update. The receiver may block for one flash sector erase (about 45 ms), which would delay the output pin of that
+    // loop pass: a platform that drives the pin after tick() can defer the update work and call tickOta() once the pin is written.
+    void deferOtaTick(bool defer) { otaDeferred_ = defer; }
+    void tickOta(uint32_t nowMs) { ota_.tick(nowMs); }
+    OtaReceiver& ota() { return ota_; }
+    // A transfer frame that came over USB (a timer connected to the PC): payload = [op][session][body]. Replies go to the sink.
+    void setOtaUsbSink(OtaUsbSink* sink) { usbSink_ = sink; }
+    void runOtaUsb(const uint8_t* payload, size_t len, uint32_t nowMs) { ++rxOta; ota_.onPayload(kUsbMac, payload, len, nowMs); }
+
+    // False from the moment a new firmware was activated until the reboot (the output must not come on again in between).
+    bool outputOn(uint32_t nowMs) const { return !otaQuiesced_ && engine_.outputOn(nowMs); }
     const CycleEngine& engine() const { return engine_; }
     CycleEngine& engine() { return engine_; }
     const TimerSettings& settings() const { return s_; }
@@ -61,13 +83,20 @@ public:
     uint32_t bootCount() const { return boot_; }
 
     // Counters (read by the platform for the INFO payload).
-    uint32_t rxFrames = 0, rxBad = 0, rxForeign = 0, rxProbes = 0, rxCmds = 0;
+    uint32_t rxFrames = 0, rxBad = 0, rxForeign = 0, rxProbes = 0, rxCmds = 0, rxOta = 0;
     uint32_t txFrames = 0, txFail = 0, txBeats = 0, txReplies = 0;
     uint32_t cmdsRun = 0, cmdsDup = 0, cmdsRejected = 0;
     void noteTxResult(bool ok) { if (!ok) ++txFail; }   // platform: unicast frame not acknowledged by the MAC
     bool identifying = false;
 
 private:
+    // OtaIo
+    bool otaSend(const uint8_t* mac, const uint8_t* payload, size_t len) override;
+    void otaQuiesce() override { otaQuiesced_ = true; plat_.quiesceOutput(); }
+    void otaReboot() override { plat_.reboot(); }
+    void otaLog(const char* msg) override { plat_.log(msg); }
+    static constexpr uint8_t kUsbMac[6] = {0, 0, 0, 0, 0, 0};      // pseudo source address of a transfer that comes over USB
+
     struct Pending { bool used = false; uint8_t mac[6] = {0}; uint32_t due = 0; uint8_t kind = 0; };   // kind: 0 status, 1 info
     void handleCmd(const uint8_t* src, const FrameView& f, uint32_t nowMs);
     uint8_t applyOp(uint8_t op, const uint8_t* args, size_t argLen, uint32_t nowMs);
@@ -77,6 +106,10 @@ private:
     void execute(uint8_t op, const uint8_t* a, size_t n, uint8_t& result, uint16_t& fx, uint32_t nowMs);
 
     TimerPlatform& plat_;
+    OtaReceiver ota_;
+    OtaUsbSink* usbSink_ = nullptr;
+    bool otaDeferred_ = false;
+    bool otaQuiesced_ = false;
     TimerSettings s_;
     CycleEngine engine_;
     CmdDedup dedup_;

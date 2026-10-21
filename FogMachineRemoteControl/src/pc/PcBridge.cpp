@@ -1,6 +1,7 @@
 #include "pc/PcBridge.h"
 
 #include <esp_system.h>
+#include "FogBase64.h"
 #include "FogJsonUtil.h"
 #include "FogUtil.h"
 
@@ -398,6 +399,59 @@ void PcBridge::onJobDone(const JobDone& d) {
     }
 }
 
+// ---- firmware update bridge (docs/OTA_UPDATE.md, section 5) ----
+void PcBridge::handleOtaTx(JsonDocument& doc, uint32_t id) {
+    JsonDocument res;
+    const int dev = resolveDev(doc);
+    uint8_t payload[kMaxPayload];
+    const char* d = doc["d"] | "";
+    const bool hasTarget = doc["mac"].is<const char*>() || !doc["dev"].isNull();
+    if (!hasTarget) {
+        jsonResult(res, id, false, "badArg", "dev or mac required");
+    } else if (dev < 0) {                                            // unknown index / MAC, or "all"
+        jsonResult(res, id, false, "noDevice", "not a paired timer");
+    } else {
+        const int n = base64Decode(d, strlen(d), payload, sizeof(payload));
+        if (n <= 0) {
+            jsonResult(res, id, false, "badArg", "d must be base64 of 1..242 bytes");
+        } else {
+            const RemoteLink::OtaSubmit r = c_.fleet->link().submitOta(dev, payload, static_cast<size_t>(n), id);
+            if (r == RemoteLink::OtaSubmit::Ok) return;           // the answer follows when the radio is done with the frame (onOtaTx)
+            if (r == RemoteLink::OtaSubmit::Full) jsonResult(res, id, false, "busy", "transmit queue full");
+            else jsonResult(res, id, false, "badArg", "cannot queue this frame");
+        }
+    }
+    json_.send(res, true);
+}
+
+void PcBridge::onOtaTx(uint32_t tag, bool sent, bool acked) {
+    if (!json_.pcPresent(millis())) return;
+    JsonDocument res;
+    if (sent) { jsonResult(res, tag, true); res["acked"] = acked; }
+    else jsonResult(res, tag, false, "noDevice", "the timer was removed");
+    json_.send(res, true);
+}
+
+void PcBridge::onOtaFrame(int dev, int8_t rssi, const uint8_t* payload, size_t len) {
+    if (!json_.pcPresent(millis()) || dev < 0 || dev >= c_.fleet->getPairedCount()) return;
+    char text[base64EncodedLen(kMaxPayload) + 1];
+    if (!base64Encode(payload, len, text, sizeof(text))) return;
+    JsonDocument d;
+    d["t"] = "otaRx";
+    d["dev"] = dev;
+    jsonMac(d.as<JsonObject>(), "mac", c_.fleet->getPaired(dev).mac);
+    d["rssi"] = rssi;
+    d["d"] = text;
+    json_.send(d, false);                                       // a lost report only costs the sender a retransmission
+}
+
+// While a firmware update runs the radio must not leave the home channel: say so instead of starting the activity.
+bool PcBridge::refuseWhileUpdating(JsonDocument& res, uint32_t id) {
+    if (!c_.fleet->updateRunning()) return false;
+    jsonResult(res, id, false, "busy", "firmware update running");
+    return true;
+}
+
 void PcBridge::onRemoved(int dev) {
     fleetDirty_ = true;
     for (PendingCmd& p : pend_) { if (!p.used) continue; if (p.dev == dev) p.dev = -1; else if (p.dev > dev) --p.dev; }
@@ -617,6 +671,7 @@ void PcBridge::handle(JsonDocument& doc, uint32_t nowMs) {
         res["heap"] = ESP.getFreeHeap();
         res["build"] = kBuildStamp;
         res["maxDevs"] = kMaxTimers;
+        res["caps"].to<JsonArray>().add("ota");            // firmware update bridge (otaTx / otaRx / otaHold)
         fleetDirty_ = true;                                // send the picture right after hello
     } else if (!strcmp(type, "ping")) {
         jsonResult(res, id, true);
@@ -650,26 +705,34 @@ void PcBridge::handle(JsonDocument& doc, uint32_t nowMs) {
         const int dev = resolveDev(doc);
         if (dev < 0) jsonResult(res, id, false, "noDevice", "unknown timer");
         else { fleet.removeDeviceByIndex(dev); fleetDirty_ = true; jsonResult(res, id, true); }
-    } else if (!strcmp(type, "discover")) {
-        if (doc["on"] | false) fleet.startDiscovery(doc["sweep"] | false); else fleet.stopDiscovery();
+    } else if (!strcmp(type, "otaTx")) {
+        handleOtaTx(doc, id);
+        return;
+    } else if (!strcmp(type, "otaHold")) {
+        fleet.link().setOtaHold(doc["on"] | false);
         jsonResult(res, id, true);
+    } else if (!strcmp(type, "discover")) {
+        if ((doc["on"] | false) && refuseWhileUpdating(res, id)) { /* answered below */ }
+        else { if (doc["on"] | false) fleet.startDiscovery(doc["sweep"] | false); else fleet.stopDiscovery(); jsonResult(res, id, true); }
     } else if (!strcmp(type, "survey")) {
-        if (fleet.startSurvey()) { surveyReq_ = id; jsonResult(res, id, true); }
+        if (refuseWhileUpdating(res, id)) { /* answered below */ }
+        else if (fleet.startSurvey()) { surveyReq_ = id; jsonResult(res, id, true); }
         else jsonResult(res, id, false, "busy", "survey/migration running, or the Wi-Fi scan could not start");
     } else if (!strcmp(type, "channel")) {
         const int ch = doc["ch"] | 0;
-        if (!validChannel(static_cast<uint8_t>(ch))) jsonResult(res, id, false, "badArg", "channel 1..13");
+        if (refuseWhileUpdating(res, id)) { /* answered below */ }
+        else if (!validChannel(static_cast<uint8_t>(ch))) jsonResult(res, id, false, "badArg", "channel 1..13");
         else if (ch == fleet.homeChannel()) jsonResult(res, id, false, "badArg", "already on that channel");
         else if (fleet.migrateTo(static_cast<uint8_t>(ch), doc["force"] | false)) jsonResult(res, id, true);
         else jsonResult(res, id, false, "busy", "cannot start now");
     } else if (!strcmp(type, "linkTest")) {
         const int dev = resolveDev(doc);
-        if (dev < 0) jsonResult(res, id, false, "noDevice", "unknown timer");
+        if (refuseWhileUpdating(res, id)) { /* answered below */ }
+        else if (dev < 0) jsonResult(res, id, false, "noDevice", "unknown timer");
         else if (!fleet.link().startLinkTest(dev, doc["count"] | 50, doc["gapMs"] | 40)) jsonResult(res, id, false, "busy", "link test running");
         else { linkTestReq_ = id; jsonResult(res, id, true); }
     } else if (!strcmp(type, "recover")) {
-        fleet.findLostTimers();
-        jsonResult(res, id, true);
+        if (!refuseWhileUpdating(res, id)) { fleet.findLostTimers(); jsonResult(res, id, true); }
     } else if (!strcmp(type, "logCfg")) {
         logLevel_ = logLevelFromName(doc["level"] | "off", LogLevel::Off);
         jsonResult(res, id, true);

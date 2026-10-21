@@ -4,6 +4,9 @@ This is the protocol between the **PC tool (Fog Console)** and a **remote contro
 bench work, a single **timer** plugged in directly over USB).
 It replaces the old binary `ReliableSerial` / `DebugProtocol` stack.
 
+> **Revision 3** (firmware 2.1) adds the firmware-update bridge: `otaTx`, `otaHold` and the `otaRx` event, and the `caps` list in `hello`
+> ([below](#firmware-update-tunnel-ota); the transfer itself is described in [`OTA_UPDATE.md`](OTA_UPDATE.md)). Nothing else changed.
+
 * Transport: USB-CDC virtual COM port of the XIAO ESP32-C3 (baud rate is irrelevant, use 115200).
 * Framing: **JSON Lines** — one UTF-8 JSON object per line, terminated by `\n` (accept `\r\n`).
   Max line length 4096 bytes in both directions.
@@ -40,11 +43,13 @@ It replaces the old binary `ReliableSerial` / `DebugProtocol` stack.
 ```
 Response:
 ```json
-{"t":"res","id":1,"ok":true,"kind":"remote","fw":"2.0.0","proto":2,"mac":"AA:BB:CC:00:11:22",
+{"t":"res","id":1,"ok":true,"kind":"remote","fw":"2.1.0","proto":2,"mac":"AA:BB:CC:00:11:22",
  "name":"Remote","ch":6,"net":1,"upMs":123456,"rst":"deepsleep","boots":12,"heap":182000,
- "build":"Oct 20 2026 12:00:00","maxDevs":10}
+ "build":"Oct 20 2026 12:00:00","maxDevs":10,"caps":["ota"]}
 ```
 `rst` ∈ `poweron, ext, sw, panic, wdt, deepsleep, brownout, usb, other`.
+`caps` (optional, firmware 2.1+) lists optional features: `"ota"` = the firmware-update bridge below (a remote), or the local update receiver (a timer on USB).
+An answer without `caps` means none.
 
 ### `ping`
 `{"t":"ping","id":2}` → `{"t":"res","id":2,"ok":true,"ms":123456}` (device `millis()`; use it for latency).
@@ -125,6 +130,19 @@ Optional `"confirm":false` (honoured for `mode`; other ops are always confirmed)
   Emits `linkTest` progress events and a final one with `"done":true`.
 * `{"t":"recover","id":13}` – look for timers that went quiet on other channels (sweep); same as the menu's *Find Timers*.
 
+### Firmware update tunnel (OTA)
+The PC runs the whole transfer; the remote only forwards frames to and from a paired timer. `d` is **base64** (standard alphabet, padded) of
+one OTA payload (`[op][session][body]`, 1…242 bytes; layout in [`OTA_UPDATE.md`](OTA_UPDATE.md) §4).
+
+* `{"t":"otaTx","id":20,"dev":3,"d":"AUKIEw…"}` – queue one frame for timer 3 (`mac` is accepted instead of `dev`). The answer comes when the radio is done with it:
+  `{"t":"res","id":20,"ok":true,"acked":true}` (the timer's MAC acknowledged it) or `"acked":false` (sent, nobody acknowledged).
+  Errors: `busy` (the remote's queue of 8 frames is full – retry shortly), `noDevice` (not a paired timer, or the timer was unpaired meanwhile), `badArg` (bad base64, empty, longer than 242 bytes, no `dev`/`mac`).
+  Frames are sent in order, one at a time, on the home channel; commands (`cmd`) to other timers keep priority. Keep up to 6 requests outstanding to hide the USB round trip.
+* `{"t":"otaHold","id":21,"on":true}` – keep the radio free of side activities (repeat about every 5 s while updating). Each `otaTx` renews the hold too; it ends 15 s after the last of them.
+  While it is on, `discover` (on), `survey`, `channel`, `linkTest` and `recover` are refused with `busy` / `"firmware update running"`, and automatic recovery sweeps do not start.
+* Event `{"t":"otaRx","dev":3,"mac":"AA:…","rssi":-61,"d":"gUIC…"}` – a Type::Ota frame received from a paired timer. May be dropped when the USB buffer is full (the sender polls).
+* A **timer on USB** accepts the same `otaTx` (`dev` 0 or omitted; answered at once with `acked:true`) and reports its replies as `otaRx` events; `otaHold` is accepted and ignored.
+
 ### Diagnostics
 * `{"t":"logCfg","id":14,"level":"debug"}` – enable `log` events at `error|warn|info|debug|off`.
 * `{"t":"sniff","id":15,"on":true}` – enable `frame` events (every FogLink radio frame, rate limited to 30/s).
@@ -158,7 +176,7 @@ All counters are `uint32` and count since boot, except `rst` (lifetime reset cou
  "link":{"rx":3400,"expected":3520,"lost":120,"loss":3,"dups":0,"macOk":900,"macFail":12,
          "cmds":20,"cmdsOk":19,"cmdsTimeout":1,"retries":5,"rttAvg":8.1,"rttMax":60,
          "rssiMin":-80,"rssiAvg":-61,"rssiMax":-50,"offlineEvents":3,"offlineMs":95000,"reboots":2},
- "timer":{"age":2300,"fw":"2.0.0","up":3600,"boots":7,"rstReason":"poweron",
+ "timer":{"age":2300,"fw":"2.1.0","up":3600,"boots":7,"rstReason":"poweron",
           "heap":200000,"heapMin":180000,"loopMaxUs":3100,"ch":6,"net":1,
           "rst":{"poweron":6,"brownout":1,"wdt":0,"panic":0,"sw":0,"other":0},
           "rx":820,"rxBad":0,"rxForeign":2,"rxDrop":0,"rxProbes":10,"rxCmds":14,
@@ -193,7 +211,7 @@ counters (same fields as above, without `age`); there are no `devStat` events.
 {"t":"fleet","seq":812,"active":0,"ch":6,"devs":[
  {"i":0,"mac":"AA:BB:CC:DD:EE:01","name":"Fog1","online":1,"on":1,"ph":"on","mode":"auto",
   "ton":1.5,"toff":10.0,"el":0.8,"rssi":-61,"rssiT":-58,"age":340,"loss":3,"ch":6,
-  "boot":7,"up":3600,"fw":"2.0","pend":0,"id":0}
+  "boot":7,"up":3600,"fw":"2.1","pend":0,"id":0}
 ]}
 ```
 | field | meaning |

@@ -87,7 +87,13 @@ internal sealed class SimTimer
     public double Toff { get; set; } = 10.0;
     public CyclePhase StartPhase { get; set; } = CyclePhase.Off;
     public int Channel { get; set; } = 6;
-    public string Fw { get; set; } = "2.0.0";
+    public string Fw { get; set; } = "2.1.0";
+
+    /// <summary>The over-the-air receiver (state of a firmware transfer to this timer).</summary>
+    public SimOtaReceiver Ota { get; set; } = new();
+
+    /// <summary>Firmware version that becomes active at the next boot (after an over-the-air activation).</summary>
+    public string? PendingFw { get; set; }
     public bool Led { get; set; } = true;
 
     /// <summary>Stable slot id (0…9) while paired.</summary>
@@ -180,6 +186,7 @@ internal sealed class SimTimer
     {
         Powered = false;
         PowerOffMs = offMs;
+        Ota.PowerLoss();                       // RAM is gone: a running transfer is lost, what was written to the flash stays
         NextBootBrownout = brownout;
         NextBootReason = brownout ? "brownout" : "poweron";
         Mode = TimerMode.Auto;
@@ -191,6 +198,8 @@ internal sealed class SimTimer
     {
         Powered = true;
         PowerOffMs = 0;
+        Ota.PowerLoss();
+        if (PendingFw is not null) { Fw = PendingFw; PendingFw = null; }
         Boot++;
         UptimeMs = 0;
         BootedAtMs = nowMs;

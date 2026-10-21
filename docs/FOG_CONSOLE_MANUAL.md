@@ -17,6 +17,7 @@
 9. [Diagnostics](#9-diagnostics)
 10. [Console](#10-console)
 11. [Firmware](#11-firmware)
+    * [Over the air (through the remote)](#over-the-air-through-the-remote)
 12. [Settings](#12-settings)
 13. [Offline demo (simulator)](#13-offline-demo-simulator)
 14. [A timer connected directly](#14-a-timer-connected-directly)
@@ -40,7 +41,8 @@ remote's radio it can do everything the remote's buttons do — for **all ten ti
 * **Radio tools:** channel survey, moving the whole system to a quiet channel, finding timers that were away, link tests.
 * **Debugging:** the performance counters of the remote and of every timer, health hints, history graphs, a packet inspector, the
   device log and a raw command line.
-* **Firmware update:** put new firmware on the remote or on a timer over USB, with checks and verification — no PlatformIO needed (see [§11](#11-firmware)).
+* **Firmware update:** put new firmware on the remote or on a timer over USB, with checks and verification — no PlatformIO needed — and update the
+  timers **over the air**, through the remote, while they stay inside their machines (see [§11](#11-firmware)).
 * **Offline demo:** a built-in simulator with up to ten virtual timers, so you can learn the tool without any hardware.
 
 The remote stays awake while the PC is connected. When the PC goes away the remote's normal Auto Off behaviour applies again.
@@ -250,9 +252,13 @@ Three tabs show everything the device says.
 
 ![Firmware page](../PCDiagnostics/docs/firmware-dark.png)
 
-Updates the firmware of the **remote** or of a **timer** over its USB cable, without PlatformIO. Every device is updated on its **own cable**;
-nothing is sent over the radio. The whole story behind the button — flash map, safety, how it works, what has been verified — is in
-[`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md); this is the page itself.
+Updates the firmware of the **remote** or of a **timer** without PlatformIO, by one of two **routes** (the switch at the top of the page):
+
+* **USB cable** — the device is put into its ROM bootloader, written and verified on **its own cable**. This is the only way to update the remote, and the
+  first update of a timer that has no over-the-air support yet. The rest of this section describes it. The whole story behind the button — flash map, safety,
+  how it works, what has been verified — is in [`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md).
+* **Over the air (through the remote)** — the timers are updated through the remote's radio while they stay in their machines; see
+  [below](#over-the-air-through-the-remote).
 
 **1 · Device.** The serial port of the device to update. If the tool is connected to a port, that one is pre-selected and the card says what
 it is (*Remote “Fogger” · firmware 2.0.0*). The tool closes its connection for the update and restores it afterwards. A remote in deep sleep
@@ -286,7 +292,8 @@ device reports after the restart.
 ![Update done](../PCDiagnostics/docs/firmware-done-dark.png)
 
 **Timers of this system** lists the firmware version every paired timer reported through the remote, compared with the newest timer firmware
-the tool knows: *up to date*, *older than 2.1.0* … Use it to see which timers still need the update; each one is then updated on its own cable.
+the tool knows: *up to date*, *older than 2.2.0* … Use it to see which timers still need the update; each one is then updated on its own cable —
+or, when it has over-the-air support, [through the remote](#over-the-air-through-the-remote).
 The **Log** records every step; *Copy* puts it on the clipboard for a bug report.
 
 **It asks before it does something questionable:** timer firmware for a remote (or the reverse), a file that does not say which kind it is, and a
@@ -295,6 +302,70 @@ cable is touched. Closing the window during an update asks for confirmation.
 
 In the **offline demo** the page works on a *simulated* chip and two demo images: you can run the complete procedure, including a cancel, with
 nothing connected.
+
+### Over the air (through the remote)
+
+![Over the air](../PCDiagnostics/docs/firmware-ota-dark.png)
+
+Choose **Over the air (through the remote)** at the top of the page. The timers stay inside their machines; the firmware travels from the PC over
+the remote's USB cable and its radio to the timer. The PC runs the whole transfer; the remote only forwards the radio frames. A timer writes the new
+firmware into its **second application slot** while the old one keeps running, checks it, switches over and restarts. If the new firmware does not
+start, the boot loader goes back to the old one by itself. The protocol and the safety reasoning are in [`OTA_UPDATE.md`](OTA_UPDATE.md).
+
+**What you need.** The connected remote must run firmware 2.1.0 or newer (it announces the capability *ota*); otherwise the page says
+*“The remote's firmware … cannot forward firmware updates to timers. Update the remote over USB first”*. A timer needs the two-slot layout:
+**the first update of a timer is always over its USB cable** (the *Update* mode installs the new partition layout and keeps settings and pairing).
+After that, every update can be done over the air. A timer that is plugged into the PC directly can be updated over its own cable the same way ([§14](#14-a-timer-connected-directly)).
+
+**1 · Firmware.** The same list as for the USB route. Choose a **timer** firmware: the page refuses a firmware for the remote, a file that does
+not carry the timer's identity string, a damaged file and an image for another chip — and says why, in words, above the *Update* button.
+Only the application image is sent; boot loader and partition table are never touched over the air.
+
+**2 · Timers.** One row per paired timer with its name, address, the firmware version it runs, whether it is **online**, and what it can do:
+
+| Chip | Meaning |
+|------|---------|
+| `ready for OTA` | The timer answered the check: it has a second slot and is idle |
+| `needs a USB update first` | The timer answered, but it has no second application slot. Update it once over its USB cable |
+| `no OTA firmware` | The timer did not answer: its firmware has no over-the-air support (or it is out of range). Update it once over USB |
+| `busy with another update` | The timer is already receiving something |
+| `not checked` | Nobody has asked yet |
+
+**Check support** asks the ticked timers (all, when none is ticked) and changes nothing on them. **Outdated** ticks the online timers whose version is older
+than the chosen firmware; **All** and **None** do what they say. A timer that is *offline* — its machine is heating up, so it has no power — cannot take part
+and is skipped with a note.
+
+**3 · Update.** **Update selected timers** works through the ticked timers **one after another**. Each row shows what is happening — *Waiting*,
+*Contacting the timer*, *Preparing the timer's flash*, *Sending the firmware* with a bar, the speed, the time left and how many pieces had to be sent again,
+*The timer checks the firmware*, *Switching to the new firmware*, *Waiting for the timer to restart* — and ends with *Updated 2.1.0 → 2.2.0 in 11 s*, or with a plain reason why not. **Cancel** stops the update; the timer
+that was being updated keeps its old firmware. The **Log** underneath records every step and can be copied for a bug report.
+
+![Two timers, one finished, one sending](../PCDiagnostics/docs/firmware-ota-progress-dark.png)
+
+![Both updated](../PCDiagnostics/docs/firmware-ota-done-dark.png)
+
+**While an update runs.** The timer keeps cycling; hold-to-fog and the other commands keep working. The remote is kept free for the transfer, so
+discovery, channel survey and channel moves, link tests and *Find lost timers* are refused with the note that a firmware update is running. At the end the timer restarts for
+a moment — its output is off — and comes back with the new version and a raised boot counter. The tool waits for that, then reports the result. Closing
+the window during an update asks for confirmation; the timers that have not switched yet keep their old firmware.
+
+**When something goes wrong** the timer keeps working with its old firmware, and the row says what happened:
+
+![A power cut in the middle of a transfer](../PCDiagnostics/docs/firmware-ota-fail-dark.png)
+
+* *The timer is offline … (power cut while its machine heats up, or out of range)* — a machine that heats up cuts the power to its timer. If the timer comes
+  back within two minutes the transfer is started again by itself; otherwise the row fails. Try again when the machine has heated up.
+* *Loss on the radio* costs time, not correctness: lost pieces are sent again (*“12 re-sent”*), and what the timer wrote is compared with the file by its SHA-256
+  before it switches over.
+* *The timer rejected the OTA key* — see below.
+* *The timer restarted but still runs firmware …* — the new firmware did not come up and the boot loader replaced it by the old one.
+
+**The OTA key.** A timer accepts an update only from a sender that knows the key (a code proves the start request). The key in **Settings → Over-the-air key**
+(default `FogLink-OTA-v1`) must be the one the timer firmware was built with. It keeps accidents and neighbours' tools out; it is **not** a secret and no
+protection against someone with physical access (see [`OTA_UPDATE.md`](OTA_UPDATE.md#7-safety)).
+
+In the **offline demo** the simulated timers update at an accelerated pace: Fog5 *needs a USB update first*, Fog7 has *no OTA firmware*, a few machines heat up now and
+then, and *Demo controls → Cut power* during a transfer shows what a failure looks like.
 
 ---
 
@@ -313,7 +384,7 @@ nothing connected.
 | Battery calibration | Battery millivolts that count as 0 %, 50 % and 100 %. *Use live voltage* takes the current reading |
 | Network id | Read-only (always 1) |
 
-**This application** — theme (System / Light / Dark), how many log/raw lines and packets are kept, what the offline demo pretends to be (applies the next time the simulator starts) and an *About* box with the connected device's information. Reconnecting after the remote re-appears happens automatically.
+**This application** — theme (System / Light / Dark), how many log/raw lines and packets are kept, what the offline demo pretends to be (applies the next time the simulator starts), the **over-the-air key** (see [§11](#over-the-air-through-the-remote); leave it at the default unless you built the timer firmware with your own) and an *About* box with the connected device's information. Reconnecting after the remote re-appears happens automatically.
 
 ---
 
@@ -343,6 +414,7 @@ for a while) are part of the default scenario.
 Plug a **timer** (not the remote) into the PC and connect: the tool recognises it and treats it as a fleet of one. Fleet functions (pairing, channel
 survey…) are hidden; you can configure the timer (name, ON/OFF times, start phase), control it, watch its log and see its own counters under
 Diagnostics. This is the easiest way to prepare a timer on the bench before it goes on a machine — and the place to put the newest firmware on it ([§11](#11-firmware)).
+A timer with over-the-air support can also take its update over this cable through the *Over the air* route: the list then has one row, and no remote and no radio are involved.
 
 ---
 
@@ -358,6 +430,9 @@ Diagnostics. This is the easiest way to prepare a timer on the bench before it g
   just press again.
 * **Firmware updates are checked and verified:** the image must be intact and built for the ESP32-C3, a timer/remote mix-up and a clean install ask first, every
   written part is compared with the file by the chip itself, and a failed or cancelled run still sends the device back to its application.
+* **Over-the-air updates cannot brick a timer:** the running firmware is never overwritten (the new one goes into the other slot), a start request needs the
+  OTA key, the written image is compared by SHA-256 before the switch, and a firmware that does not come up is replaced by the old one by the boot loader.
+  A lost cable, a power cut or a bad radio link only ends the transfer.
 * The radio link is not encrypted; see the [user manual](MANUAL.md#2-safety).
 
 ---
@@ -376,6 +451,11 @@ Diagnostics. This is the easiest way to prepare a timer on the bench before it g
 | Channel move “cancelled” | No timer answered. Power the machines on or tick **Force** |
 | The window opens on the wrong monitor | Un-maximize, move it, maximize again — the restored position is remembered |
 | Firmware page: “in use by another program” | Close the serial monitor / PlatformIO / second Fog Console that has the port |
+| Over the air: “cannot forward firmware updates to timers” | The remote's firmware is older than 2.1.0. Update the remote over its USB cable first |
+| Over the air: `needs a USB update first` / `no OTA firmware` | The timer has no two-slot layout or an older firmware: update it **once** over its USB cable (mode *Update*), then use the radio |
+| Over the air: “The timer is offline …” | Its machine is heating up (no power) or it is out of range; try again later. The timer keeps its old firmware |
+| Over the air: “rejected the OTA key” | **Settings → Over-the-air key** differs from the key the timer firmware was built with |
+| Over the air: very slow, many “re-sent” | A poor radio link (see [Diagnostics](#9-diagnostics)): move the remote closer, or choose a quieter channel; it still ends correctly |
 | Firmware page: “did not enter its bootloader” | Put the device into download mode by hand (hold BOOT, tap RESET, release BOOT), tick the box on the page, press Flash. More in [`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md#7-troubleshooting) |
 
 If something looks wrong, **Console → Raw** shows the exact lines exchanged, and **Diagnostics → Copy as JSON** captures the counters.

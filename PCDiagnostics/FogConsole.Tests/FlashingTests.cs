@@ -168,7 +168,8 @@ public class EspImageTests
         var entries = PartitionTable.Parse(DemoFirmware.CreatePartitionTable());
         Assert.Equal(5, entries.Count);
         Assert.Equal(0x9000u, entries.Single(e => e.IsNvs).Offset);
-        Assert.Equal(0x10000u, entries.Single(e => e.IsApp).Offset);
+        Assert.Equal(new[] { 0x10000u, 0x1F0000u }, entries.Where(e => e.IsApp).Select(e => e.Offset).ToArray());     // two application slots
+        Assert.All(entries.Where(e => e.IsApp), e => Assert.Equal(0x1E0000u, e.Size));
         Assert.Equal(0xE000u, entries.Single(e => e.IsOtaData).Offset);
     }
 
@@ -232,8 +233,9 @@ public class FirmwareSetTests : IDisposable
     {
         var set = DemoFirmware.CreateSet(FirmwareKind.Timer, "2.0.0");
         var plan = set.BuildPlan(FlashMode.Update);
-        var seg = Assert.Single(plan.Segments);
-        Assert.Equal(0x10000u, seg.Offset);
+        // the OTA data goes first (slot 0 must be the one that boots), then the application
+        Assert.Equal(new[] { "OTA data", "application" }, plan.Segments.Select(s => s.Label).ToArray());
+        Assert.Equal(new[] { 0xE000u, 0x10000u }, plan.Segments.Select(s => s.Offset).ToArray());
         Assert.NotNull(plan.Guard);
         Assert.Equal(0x8000u, plan.Guard!.Offset);
         Assert.Equal(4, plan.Guard.WriteInstead.Count);
@@ -562,6 +564,7 @@ public class FirmwareFlasherTests
         Array.Fill(init, (byte)0xFF);
         set.Bootloader!.CopyTo(init, 0);
         set.PartitionTableBin!.CopyTo(init, 0x8000);
+        set.BootApp0!.CopyTo(init, 0xE000);                         // slot 0 selected, as after a USB install
         return new SimulatedRom(new SimulatedRomOptions { InitialFlash = init });
     }
 
@@ -607,11 +610,50 @@ public class FirmwareFlasherTests
         var (r, _, log, _) = await RunAsync(set, FlashMode.Update, rom);
         Assert.True(r.Success);
         Assert.True(r.AlreadyUpToDate);
-        Assert.Equal(1, r.SegmentsSkipped);
+        Assert.Equal(2, r.SegmentsSkipped);                          // OTA data and application
         Assert.Equal(blocks, rom.BlocksWritten);
         Assert.Contains("already has exactly this firmware", r.Message);
         Assert.Contains(log, l => l.Contains("already up to date"));
         Assert.True(r.Restarted, "even when nothing is written the chip must leave the bootloader");
+    }
+
+    [Fact]
+    public async Task An_update_selects_slot_0_again_when_the_device_last_ran_from_slot_1()
+    {
+        // after over-the-air updates the OTA data may point at slot 1; a USB update writes slot 0 and must make it boot
+        var set = DemoFirmware.CreateSet(FirmwareKind.Timer, "2.1.0");
+        var rom = RomWithLayout(set);
+        rom.Flash[0xE000] = 0x02;                                    // OTA data: sequence 2 = slot 1
+        rom.Flash[0xE001] = 0x00;
+
+        var (r, _, _, _) = await RunAsync(set, FlashMode.Update, rom);
+        Assert.True(r.Success, r.Message);
+        Assert.Equal(2, r.SegmentsWritten);
+        Assert.Equal(set.BootApp0, Slice(rom, 0xE000, set.BootApp0!.Length));
+        Assert.Equal(set.App, Slice(rom, 0x10000, set.App.Length));
+    }
+
+    [Fact]
+    public async Task A_device_with_the_old_single_slot_layout_gets_the_new_layout_and_keeps_its_settings()
+    {
+        // the first over-the-air capable firmware is installed over USB on a device that carries the previous layout (one 3 MB slot)
+        var set = DemoFirmware.CreateSet(FirmwareKind.Timer, "2.1.0");
+        var init = new byte[SimulatedRom.FlashSize];
+        Array.Fill(init, (byte)0xFF);
+        var oldTable = DemoFirmware.CreatePartitionTable();
+        // pretend the old table differs: single big app partition
+        oldTable[2 * 32 + 8] = 0x00; oldTable[2 * 32 + 9] = 0x00; oldTable[2 * 32 + 10] = 0x30;      // app0 size 0x300000
+        oldTable.CopyTo(init, 0x8000);
+        for (int i = 0; i < 0x5000; i++) init[0x9000 + i] = (byte)(i % 199);
+        var settings = init.AsSpan(0x9000, 0x5000).ToArray();
+
+        var rom = new SimulatedRom(new SimulatedRomOptions { InitialFlash = init });
+        var (r, _, log, _) = await RunAsync(set, FlashMode.Update, rom);
+
+        Assert.True(r.Success, r.Message);
+        Assert.Contains(log, l => l.Contains("different partition table"));
+        Assert.Equal(set.PartitionTableBin, Slice(rom, 0x8000, set.PartitionTableBin!.Length));
+        Assert.Equal(settings, Slice(rom, 0x9000, 0x5000));
     }
 
     [Fact]

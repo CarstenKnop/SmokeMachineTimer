@@ -169,6 +169,8 @@ thermostat cuts the supply).</p>
 <li>Connect the remote, open <code>FogMachineRemoteControl</code>, <strong>Upload</strong>.</li>
 <li><strong>Or without PlatformIO:</strong> Fog Console updates the remote or a timer over its USB cable — page <strong>Firmware</strong>, pick the firmware, press <strong>Flash firmware</strong>
   (see the <a href="FOG_CONSOLE_MANUAL.md#11-firmware">Fog Console manual</a> and <a href="FIRMWARE_UPDATE.md"><code>FIRMWARE_UPDATE.md</code></a>).</li>
+<li><strong>Timers that are built into a machine</strong> can be updated <strong>over the air</strong> through the remote (connected to the PC by USB) — see <a href="OTA_UPDATE.md"><code>OTA_UPDATE.md</code></a>. The very first
+  installation of firmware 2.1 on a timer still needs its USB cable once (it brings the two application slots that OTA needs).</li>
 <li>If a board does not show up as a COM port: hold its <strong>BOOT</strong> button, tap <strong>RESET</strong>, release BOOT, then upload.
   For the remote, holding <strong>UP</strong> while it powers up also opens a 60 s <em>update window</em> (screen shows “Firmware Update Mode”).</li>
 </ul>
@@ -539,7 +541,7 @@ time; nothing is connected to real machines). The demo needs no hardware.</p>
 </tr>
 <tr>
 <td><strong>Firmware</strong></td>
-<td>Update the remote or a timer over USB: recognises timer and remote firmware, checks and verifies the image, shows which timers still run an older version</td>
+<td>Update the remote or a timer over USB, or the timers <strong>over the air through the remote</strong>: recognises timer and remote firmware, checks and verifies the image, shows which timers still run an older version</td>
 </tr>
 <tr>
 <td><strong>Settings</strong></td>
@@ -673,9 +675,10 @@ time; nothing is connected to real machines). The demo needs no hardware.</p>
 <hr />
 <h2 id="11-maintenance">11. Maintenance</h2>
 <ul>
-<li><strong>Update firmware:</strong> Fog Console → <strong>Firmware</strong> → <em>Flash firmware</em> (details: <a href="FIRMWARE_UPDATE.md"><code>FIRMWARE_UPDATE.md</code></a>), or PlatformIO → <em>Upload</em>. The remote can be
+<li><strong>Update firmware:</strong> Fog Console → <strong>Firmware</strong> → <em>Flash firmware</em> (USB; details: <a href="FIRMWARE_UPDATE.md"><code>FIRMWARE_UPDATE.md</code></a>), or PlatformIO → <em>Upload</em>. The remote can be
   put into a 60 s <em>update window</em> by holding <strong>UP</strong> while powering it up. Settings, pairing and names are kept by an <em>Update</em> (they live in non-volatile
-  storage and have a version check); only a <em>Clean install</em> erases them. Each timer is updated over its own USB cable, on the bench.</li>
+  storage and have a version check); only a <em>Clean install</em> erases them. <strong>Timers</strong> inside machines are updated <strong>over the air</strong> through the remote
+  (<a href="OTA_UPDATE.md"><code>OTA_UPDATE.md</code></a>): the running firmware is never touched until the new one has been written and verified, and a new firmware that does not start is rolled back.</li>
 <li><strong>Factory reset:</strong> <em>Reset Timer</em> / <em>Reset Remote</em> in the menu, or from the PC tool.</li>
 <li><strong>Battery:</strong> the remote charges over USB. Calibrate the percentage once with a full and an empty battery.</li>
 <li><strong>Several systems in one room:</strong> give each system its own channel (<strong>Channel</strong> menu) and pair only your own timers.</li>

@@ -94,11 +94,11 @@ public sealed partial class SimDevice
             case "select": if (RequireRemote(id)) HandleSelect(id, req); break;
             case "pair": if (RequireRemote(id)) HandlePair(id, req); break;
             case "unpair": if (RequireRemote(id)) HandleUnpair(id, req); break;
-            case "discover": if (RequireRemote(id)) HandleDiscover(id, req); break;
-            case "survey": if (RequireRemote(id)) HandleSurvey(id); break;
-            case "channel": if (RequireRemote(id)) HandleChannel(id, req); break;
-            case "linkTest": if (RequireRemote(id)) HandleLinkTest(id, req); break;
-            case "recover": if (RequireRemote(id)) HandleRecover(id); break;
+            case "discover": if (RequireRemote(id) && !(TryBool(req["on"], out bool disc) && disc && RefuseWhileOtaHeld(id))) HandleDiscover(id, req); break;
+            case "survey": if (RequireRemote(id) && !RefuseWhileOtaHeld(id)) HandleSurvey(id); break;
+            case "channel": if (RequireRemote(id) && !RefuseWhileOtaHeld(id)) HandleChannel(id, req); break;
+            case "linkTest": if (RequireRemote(id) && !RefuseWhileOtaHeld(id)) HandleLinkTest(id, req); break;
+            case "recover": if (RequireRemote(id) && !RefuseWhileOtaHeld(id)) HandleRecover(id); break;
             case "logCfg": HandleLogCfg(id, req); break;
             case "sniff":
                 if (!TryBool(req["on"], out bool on)) Fail(id, "badArg", "'on' (bool) required");
@@ -109,6 +109,8 @@ public sealed partial class SimDevice
                 Schedule(250, () => DoReboot(TimeSpan.FromSeconds(3.5)));
                 break;
             case "factoryReset": HandleFactoryReset(id, req); break;
+            case "otaTx": HandleOtaTx(id, req); break;
+            case "otaHold": HandleOtaHold(id, req); break;
             default: Fail(id, "unknownType", $"unknown request type '{type}'"); break;
         }
     }
@@ -117,8 +119,9 @@ public sealed partial class SimDevice
     {
         bool remote = IsRemote;
         r["kind"] = remote ? "remote" : "timer";
-        r["fw"] = "2.0.0";
+        r["fw"] = "2.1.0";
         r["proto"] = 2;
+        r["caps"] = new JsonArray("ota");
         r["mac"] = remote ? "AA:BB:CC:00:11:22" : _timers[0].Mac;
         r["name"] = remote ? "Remote" : _timers[0].Name;
         r["ch"] = _homeCh;

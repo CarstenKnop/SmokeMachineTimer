@@ -28,6 +28,15 @@ public sealed class SimOptions
 
     /// <summary>Wall clock speed multiplier used by <see cref="SimDevice.SyncToClock"/>.</summary>
     public double Speed { get; init; } = 1.0;
+
+    /// <summary>The key the simulated timers expect in an over-the-air <c>Begin</c> (null = the default key).</summary>
+    public string? OtaKey { get; init; }
+
+    /// <summary>Index (in the paired list) of a timer with OTA code but only one application slot ("needs a USB update first"); -1 = none.</summary>
+    public int OtaNoSlotIndex { get; init; } = -1;
+
+    /// <summary>Index of a timer running old firmware without OTA support (it never answers an OTA frame, reports 2.0.0); -1 = none.</summary>
+    public int OtaLegacyIndex { get; init; } = -1;
 }
 
 /// <summary>
@@ -210,6 +219,7 @@ public sealed partial class SimDevice
         RunScheduled();
         if (_opt.Kind == SimKind.Timer) StepDirectTimer();
         else StepRemote();
+        if (_opt.Kind == SimKind.Timer) StepOta();
     }
 
     // ---- helpers --------------------------------------------------------------------------

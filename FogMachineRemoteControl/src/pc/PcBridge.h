@@ -42,6 +42,8 @@ public:
     void onLinkTest(const Fog::LinkTestResult& r) override;
     void onHomeChannel(uint8_t) override { fleetDirty_ = true; }
     void onRemoved(int dev) override;
+    void onOtaTx(uint32_t tag, bool sent, bool acked) override;
+    void onOtaFrame(int dev, int8_t rssi, const uint8_t* payload, size_t len) override;
 
 private:
     struct PendingCmd { bool used = false; uint16_t job = 0; uint32_t req = 0; int8_t dev = -1; uint8_t op = 0; };
@@ -52,6 +54,8 @@ private:
     void handleGet(JsonDocument& doc, uint32_t id, uint32_t nowMs);
     void handleSet(JsonDocument& doc, uint32_t id);
     void handleFactoryReset(JsonDocument& doc, uint32_t id, uint32_t nowMs);
+    void handleOtaTx(JsonDocument& doc, uint32_t id);
+    bool refuseWhileUpdating(JsonDocument& res, uint32_t id);
     int resolveDev(JsonDocument& doc) const;               // >=0 index, -1 none, -2 all
     void fillSettings(JsonObject o) const;
     void sendFleet(uint32_t nowMs);

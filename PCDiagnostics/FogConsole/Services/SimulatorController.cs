@@ -22,6 +22,9 @@ public sealed partial class SimulatorController : ObservableObject
     [ObservableProperty] private SimKind _kind = SimKind.Remote;
     [ObservableProperty] private bool _demoScenario = true;
 
+    /// <summary>The key the simulated timers expect for over-the-air updates (null = the default key; a different key in Settings gives "rejected").</summary>
+    public string? OtaKey { get; set; }
+
     /// <summary>Random power cuts and CPU hiccups (off = a calm, reproducible world).</summary>
     [ObservableProperty] private bool _chaos = true;
 
@@ -35,6 +38,9 @@ public sealed partial class SimulatorController : ObservableObject
         TotalTimers = Math.Min(13, Math.Clamp(TimerCount, 1, MaxTimers) + 3),
         Chaos = Chaos,
         Demo = DemoScenario && TimerCount >= 4,
+        OtaKey = OtaKey,
+        OtaNoSlotIndex = 4,          // Fog5: OTA code, but only one application slot ("needs a USB update first")
+        OtaLegacyIndex = 6,          // Fog7: old firmware without OTA support
     };
 
     /// <summary>Creates a fresh simulated device (the old one is discarded) and applies the live demo settings.</summary>

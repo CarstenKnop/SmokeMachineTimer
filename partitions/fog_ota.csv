@@ -1,0 +1,9 @@
+# Partition table of the remote and the timer (4 MB flash): two application slots for over-the-air updates.
+# NVS keeps its address (0x9000), so settings and pairing survive the change from the older single-slot layout.
+# See docs/OTA_UPDATE.md.
+# Name,    Type, SubType,  Offset,   Size,     Flags
+nvs,       data, nvs,      0x9000,   0x5000,
+otadata,   data, ota,      0xe000,   0x2000,
+app0,      app,  ota_0,    0x10000,  0x1E0000,
+app1,      app,  ota_1,    0x1F0000, 0x1E0000,
+coredump,  data, coredump, 0x3D0000, 0x10000,

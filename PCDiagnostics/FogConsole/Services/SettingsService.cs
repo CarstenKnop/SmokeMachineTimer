@@ -52,6 +52,9 @@ public sealed class AppSettings
     /// <summary>Remote | Timer</summary>
     public string SimulatorKind { get; set; } = "Remote";
 
+    /// <summary>The key a timer firmware expects in an over-the-air update (must be the one the timers were built with).</summary>
+    public string OtaKey { get; set; } = "FogLink-OTA-v1";
+
     /// <summary>Firmware files or folders the user picked on the Firmware page (offered again next time).</summary>
     public List<string> FirmwarePaths { get; set; } = new();
 }
@@ -93,6 +96,7 @@ public sealed class SettingsService
                     s.Devices ??= new();
                     s.CustomPresets ??= new();
                     s.FirmwarePaths ??= new();
+                    if (string.IsNullOrWhiteSpace(s.OtaKey)) s.OtaKey = "FogLink-OTA-v1";
                     s.LogBufferSize = Math.Clamp(s.LogBufferSize, 500, 100_000);
                     s.PacketBufferSize = Math.Clamp(s.PacketBufferSize, 500, 100_000);
                     return s;

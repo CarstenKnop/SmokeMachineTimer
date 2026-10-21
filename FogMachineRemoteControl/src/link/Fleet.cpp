@@ -197,7 +197,7 @@ bool Fleet::pairWithIndex(int idx) {
 }
 
 void Fleet::startDiscovery(bool sweep) {
-    link_.startDiscovery(sweep);
+    if (!link_.startDiscovery(sweep)) { showToast("Update running", now_); return; }
     lastDiscRefresh_ = 0;
 }
 
@@ -254,13 +254,25 @@ void Fleet::factoryResetActive() {
     link_.submitFactoryReset(active_);
 }
 
+void Fleet::findLostTimers() {
+    if (!link_.startRecover(-1)) showToast("Update running", now_);
+}
+
+bool Fleet::startLinkTest(uint16_t count, uint16_t gapMs) {
+    ltResult_ = Fog::LinkTestResult();
+    if (link_.otaHeld()) { showToast("Update running", now_); return false; }
+    return active_ >= 0 && active_ < count_ && link_.startLinkTest(active_, count, gapMs);
+}
+
 bool Fleet::startSurvey() {
+    if (link_.otaHeld()) { showToast("Update running", now_); return false; }
     if (survey_.active() || link_.migrating()) return false;
     stopDiscovery();
     return survey_.start(link_.homeChannel(), now_);
 }
 
 bool Fleet::migrateTo(uint8_t channel, bool force) {
+    if (link_.otaHeld()) { showToast("Update running", now_); return false; }
     migOk_ = migFail_ = migTotal_ = 0;
     migResult_ = -1;
     return link_.startMigrate(channel, force);

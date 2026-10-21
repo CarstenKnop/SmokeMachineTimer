@@ -48,8 +48,8 @@ for radios that have to work in a noisy 2.4 GHz environment.
 
 **Fog Console (Windows)**
 * Dashboard with one card per timer, **hold-to-fog**, bulk actions, stagger start.
-* **Firmware update over USB** for the remote and every timer: recognises timer/remote images, checks and verifies them, keeps
-  settings and pairing — no PlatformIO needed.
+* **Firmware update** for the remote and every timer: over **USB**, and for timers that sit inside a machine **over the air through the remote**
+  — images are recognised, checked and verified, settings and pairing are kept, a firmware that does not start is rolled back. No PlatformIO needed.
 * Device pages, pairing, channel survey / migration / link lab, **diagnostics with counters and health hints**, packet inspector,
   raw console, remote settings.
 * **Offline demo mode** with a simulated fleet — try everything without hardware.
@@ -148,7 +148,8 @@ Only UP/DOWN (GPIO 3/4) can wake the ESP32-C3 from deep sleep. **Check the timer
 |----------|-----|
 | [**User manual**](docs/MANUAL.md) ([HTML](docs/MANUAL.html)) | Using the remote and the timers: setup, buttons, every menu screen, troubleshooting |
 | [**Fog Console manual**](docs/FOG_CONSOLE_MANUAL.md) | The Windows tool, page by page, with screenshots |
-| [**Firmware update**](docs/FIRMWARE_UPDATE.md) | Updating the remote and the timers over USB: modes, flash map, safety, recovery, how it works |
+| [**Firmware update over USB**](docs/FIRMWARE_UPDATE.md) | Updating the remote and the timers over USB: modes, flash map, safety, recovery, how it works |
+| [**Over-the-air update**](docs/OTA_UPDATE.md) | Updating the timers through the remote: protocol, flash layout, safety (the design specification) |
 | **Design specifications** | |
 | [Radio protocol & design (FogLink 2)](docs/RADIO_PROTOCOL.md) | Frame format, delivery model, channels, power-cut behaviour, why the old link failed |
 | [USB protocol (FogSerial/2)](docs/SERIAL_PROTOCOL.md) | JSON-lines protocol between the PC tool and a remote/timer, incl. performance counters |
@@ -160,7 +161,8 @@ Only UP/DOWN (GPIO 3/4) can wake the ESP32-C3 from deep sleep. **Check the timer
 ```
 FogMachineTimer/            timer firmware (PlatformIO project)
 FogMachineRemoteControl/    remote firmware (PlatformIO project)
-lib/FogLink/                shared protocol, radio, storage, USB JSON link (pure C++ core is host-tested)
+lib/FogLink/                shared protocol, radio, storage, USB JSON link, OTA receiver (pure C++ core is host-tested)
+partitions/                 flash layout of both firmwares (two application slots)
 PCDiagnostics/              Fog Console (WPF, .NET 10) + tests + screenshots
 docs/                       manuals, specifications, pictures
 tools/native-tests/         host-side protocol simulation (198 checks)

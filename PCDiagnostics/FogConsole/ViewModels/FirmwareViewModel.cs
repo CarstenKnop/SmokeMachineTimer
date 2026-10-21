@@ -49,6 +49,9 @@ public sealed class TimerFirmwareRow
 
 public enum FlashPhase { Idle, Running, Succeeded, Failed, Cancelled }
 
+/// <summary>How the firmware gets to the device: over the device's own USB cable, or over the air through the remote.</summary>
+public enum UpdateRoute { Usb, Ota }
+
 /// <summary>
 /// Firmware update over USB: pick a device and a firmware, press Flash. The remote or timer is reset into its ROM
 /// bootloader, written, verified and restarted; the connection of the PC tool is handed back and forth automatically.
@@ -56,6 +59,9 @@ public enum FlashPhase { Idle, Running, Succeeded, Failed, Cancelled }
 public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
 {
     private const int MaxLogLines = 600;
+
+    /// <summary>Version of the images of the offline demo (the simulated timers report 2.1.0, so the demo firmware is newer).</summary>
+    public const string DemoVersion = "2.2.0";
 
     private readonly AppServices _app;
     private readonly ObservableCollection<PortInfo> _ports;
@@ -72,6 +78,11 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
         _refreshPorts = refreshPorts;
         _disconnect = disconnect;
         _reconnect = reconnect;
+        Ota = new OtaViewModel(app, () => Selected);
+        Ota.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OtaViewModel.IsBusy)) OnPropertyChanged(nameof(ChoicesEnabled));
+        };
         app.Fleet.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(FleetState.IsLive)) RefreshDeviceInfo();
@@ -103,6 +114,9 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     /// <summary>How long the device is given to re-appear on USB before the PC tool reconnects (tests shorten it).</summary>
     public TimeSpan RestartWait { get; set; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>The over-the-air route (timers through the remote).</summary>
+    public OtaViewModel Ota { get; }
+
     public ObservableCollection<PortInfo> Ports => _ports;
     public ObservableCollection<FirmwareChoice> Choices { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
@@ -122,6 +136,20 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     [ObservableProperty] private string _deviceTitle = "No device";
     [ObservableProperty] private string _deviceDetail = "";
     [ObservableProperty] private string _catalogNote = "";
+    [ObservableProperty] private UpdateRoute _route = UpdateRoute.Usb;
+
+    public bool IsUsbRoute { get => Route == UpdateRoute.Usb; set { if (value) Route = UpdateRoute.Usb; } }
+    public bool IsOtaRoute { get => Route == UpdateRoute.Ota; set { if (value) Route = UpdateRoute.Ota; } }
+
+    /// <summary>The firmware list and its buttons are locked while any update runs.</summary>
+    public bool ChoicesEnabled => !IsBusy && !Ota.IsBusy;
+
+    partial void OnRouteChanged(UpdateRoute value)
+    {
+        OnPropertyChanged(nameof(IsUsbRoute));
+        OnPropertyChanged(nameof(IsOtaRoute));
+        if (value == UpdateRoute.Ota) Ota.Refresh();
+    }
 
     public bool IsBusy => Phase == FlashPhase.Running;
     public bool HasResult => ResultText.Length > 0;
@@ -158,6 +186,7 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
         OnPropertyChanged(nameof(CanReinstall));
         FlashCommand.NotifyCanExecuteChanged();
         RefreshTimerRows();
+        Ota.OnFirmwareChanged();
     }
 
     partial void OnModeChanged(FlashMode value)
@@ -171,6 +200,7 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     partial void OnPhaseChanged(FlashPhase value)
     {
         OnPropertyChanged(nameof(IsBusy));
+        OnPropertyChanged(nameof(ChoicesEnabled));
         OnPropertyChanged(nameof(FlashButtonText));
         FlashCommand.NotifyCanExecuteChanged();
         CheckCommand.NotifyCanExecuteChanged();
@@ -201,6 +231,7 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
         }
         RefreshDeviceInfo();
         RefreshTimerRows();
+        Ota.Refresh();
     }
 
     private void PickDefaultPort()
@@ -217,6 +248,7 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     {
         _simulatedVersion = null;
         OnPropertyChanged(nameof(IsSimulated));
+        Ota.Refresh();
         FlashCommand.NotifyCanExecuteChanged();
         CheckCommand.NotifyCanExecuteChanged();
         RefreshDeviceInfo();
@@ -236,8 +268,8 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
         if (IsSimulated)
         {
             // so that the offline demo always has something to flash
-            Choices.Add(new FirmwareChoice(DemoFirmware.CreateSet(FirmwareKind.Remote, "2.1.0")));
-            Choices.Add(new FirmwareChoice(DemoFirmware.CreateSet(FirmwareKind.Timer, "2.1.0")));
+            Choices.Add(new FirmwareChoice(DemoFirmware.CreateSet(FirmwareKind.Remote, DemoVersion)));
+            Choices.Add(new FirmwareChoice(DemoFirmware.CreateSet(FirmwareKind.Timer, DemoVersion)));
         }
 
         CatalogNote = found.Notes.Count > 0 ? "Not usable: " + string.Join("; ", found.Notes) : "";
@@ -631,7 +663,11 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     public bool MustNotClose => IsBusy;
 
     /// <summary>Cancels a running update (used when the application closes).</summary>
-    public void CancelForShutdown() => _cts?.Cancel();
+    public void CancelForShutdown()
+    {
+        _cts?.Cancel();
+        Ota.CancelForShutdown();
+    }
 }
 
 /// <summary>An <see cref="IProgress{T}"/> that calls back on the reporting thread (no sync-context hop, unlike Progress&lt;T&gt;).</summary>

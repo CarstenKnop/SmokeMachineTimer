@@ -22,8 +22,8 @@ constexpr size_t   kNameLen        = 10;    // 9 characters + NUL
 constexpr uint8_t  kMaxTimers      = 10;
 
 // Firmware version shared by remote and timer.
-constexpr uint8_t  kFwMajor = 2, kFwMinor = 0, kFwPatch = 0;
-#define FOG_FW_STRING "2.0.0"
+constexpr uint8_t  kFwMajor = 2, kFwMinor = 1, kFwPatch = 0;
+#define FOG_FW_STRING "2.1.0"
 
 constexpr uint32_t kMinTenths      = 1;       // 0.1 s
 constexpr uint32_t kMaxTenths      = 99999;   // 9999.9 s
@@ -45,6 +45,7 @@ enum class Type : uint8_t {
     Probe  = 2,   // remote -> broadcast or unicast: "please send STATUS"
     Cmd    = 3,   // remote -> timer
     Info   = 4,   // timer -> remote: extended diagnostics (reply to GetInfo)
+    Ota    = 5,   // firmware update transfer, both directions (docs/OTA_UPDATE.md, lib/FogLink/FogOta.h)
 };
 
 constexpr size_t kHeaderLen = 6;

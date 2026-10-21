@@ -1,6 +1,7 @@
 #include "UsbConsole.h"
 
 #include <esp_system.h>
+#include "FogBase64.h"
 #include "FogJsonUtil.h"
 #include "FogUtil.h"
 
@@ -20,6 +21,7 @@ const char* modeName(Mode m) {
 
 void UsbConsole::begin() {
     json_.begin(Serial, [this](JsonDocument& doc) { handle(doc, millis()); });
+    node_.setOtaUsbSink(this);
 }
 
 void UsbConsole::loop(uint32_t nowMs) {
@@ -112,7 +114,9 @@ void UsbConsole::sendFleet(uint32_t nowMs) {
     o["ch"] = node_.settings().channel;
     o["boot"] = node_.bootCount();
     o["up"] = nowMs / 1000;
-    o["fw"] = "2.0";
+    char fw[8];
+    snprintf(fw, sizeof(fw), "%u.%u", (unsigned)kFwMajor, (unsigned)kFwMinor);
+    o["fw"] = fw;
     o["pend"] = 0;
     o["id"] = 0;
     json_.send(d, false);
@@ -167,6 +171,44 @@ void UsbConsole::sendStats(uint32_t nowMs, uint32_t id, bool asResponse) {
     node_.buildInfo(info);
     jsonTimerInfo(self["timer"].to<JsonObject>(), info);
     json_.send(d, asResponse);
+}
+
+// ---- firmware update of a timer that is connected by USB (docs/OTA_UPDATE.md, section 5): the same otaTx / otaRx messages as through a remote ----
+void UsbConsole::handleOtaTx(JsonDocument& doc, uint32_t id, uint32_t nowMs) {
+    JsonDocument res;
+    const JsonVariantConst dev = doc["dev"];
+    uint8_t payload[kMaxPayload];
+    const char* d = doc["d"] | "";
+    if (!dev.isNull() && !(dev.is<int>() && dev.as<int>() == 0) && !doc["mac"].is<const char*>()) {
+        jsonResult(res, id, false, "noDevice", "a directly connected timer is device 0");
+    } else {
+        const int n = base64Decode(d, strlen(d), payload, sizeof(payload));
+        if (n <= 0) {
+            jsonResult(res, id, false, "badArg", "d must be base64 of 1..242 bytes");
+        } else {
+            jsonResult(res, id, true);
+            res["acked"] = true;                                   // nothing to transmit: the frame is handed to the receiver right here
+            json_.send(res, true);
+            node_.runOtaUsb(payload, static_cast<size_t>(n), nowMs);   // its replies come back as otaRx events (onOtaReply)
+            return;
+        }
+    }
+    json_.send(res, true);
+}
+
+void UsbConsole::onOtaReply(const uint8_t* payload, size_t len) {
+    if (!json_.pcPresent(millis())) return;
+    char text[base64EncodedLen(kMaxPayload) + 1];
+    if (!base64Encode(payload, len, text, sizeof(text))) return;
+    uint8_t mac[6];
+    plat_.radio.macAddress(mac);
+    JsonDocument d;
+    d["t"] = "otaRx";
+    d["dev"] = 0;
+    jsonMac(d.as<JsonObject>(), "mac", mac);
+    d["rssi"] = 0;
+    d["d"] = text;
+    json_.send(d, true);
 }
 
 void UsbConsole::handleCmd(JsonDocument& doc, uint32_t id, uint32_t nowMs) {
@@ -255,6 +297,7 @@ void UsbConsole::handle(JsonDocument& doc, uint32_t nowMs) {
         res["heap"] = ESP.getFreeHeap();
         res["build"] = kBuildStamp;
         res["maxDevs"] = 1;
+        res["caps"].to<JsonArray>().add("ota");              // firmware update over USB (otaTx / otaRx)
     } else if (!strcmp(type, "ping")) {
         jsonResult(res, id, true);
         res["ms"] = nowMs;
@@ -292,6 +335,11 @@ void UsbConsole::handle(JsonDocument& doc, uint32_t nowMs) {
     } else if (!strcmp(type, "cmd")) {
         handleCmd(doc, id, nowMs);
         return;
+    } else if (!strcmp(type, "otaTx")) {
+        handleOtaTx(doc, id, nowMs);
+        return;
+    } else if (!strcmp(type, "otaHold")) {
+        jsonResult(res, id, true);                             // nothing to hold on a timer: accepted and ignored
     } else if (!strcmp(type, "logCfg")) {
         logLevel_ = logLevelFromName(doc["level"] | "off", LogLevel::Off);
         jsonResult(res, id, true);

@@ -551,6 +551,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (_tickCount % 20 == 0)
         {
             // ~1 Hz
+            if (CurrentNav == NavPage.Firmware) Firmware.Ota.Refresh();
             Pairing.Tick();
             Channels.Tick();
             Diagnostics.Tick();
@@ -629,6 +630,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>False while a firmware update runs: closing then would leave the device without working firmware.</summary>
     public bool CanCloseNow()
     {
+        if (Firmware.Ota.IsBusy)
+            return App.Dialogs.Confirm("Firmware update in progress",
+                "Timers are being updated over the air. Closing now cancels the transfer; the timers keep their old firmware and can be updated again later.",
+                "Close anyway", destructive: true);
         if (!Firmware.MustNotClose) return true;
         return App.Dialogs.Confirm("Firmware update in progress",
             "The device is being programmed. Closing now cancels the update and leaves it without working firmware until you flash it again.",

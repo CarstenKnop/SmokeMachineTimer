@@ -58,8 +58,9 @@ public:
     // ---- channel tools ----
     bool startSurvey();
     bool migrateTo(uint8_t channel, bool force);
-    void findLostTimers() { link_.startRecover(-1); }
-    bool startLinkTest(uint16_t count, uint16_t gapMs) { ltResult_ = Fog::LinkTestResult(); return active_ >= 0 && active_ < count_ && link_.startLinkTest(active_, count, gapMs); }
+    void findLostTimers();
+    bool startLinkTest(uint16_t count, uint16_t gapMs);
+    bool updateRunning() const { return link_.otaHeld(); }      // the PC is updating a timer over the air: the radio must stay put
     const Fog::LinkTestResult& linkTestResult() const { return ltResult_; }
 
     // ---- notifications for the UI ----
@@ -86,6 +87,8 @@ public:
     void onHeard(const Fog::Heard& h) override;
     void onInfo(int dev) override;
     void onRemoved(int dev) override { if (sink_) sink_->onRemoved(dev); }
+    void onOtaTx(uint32_t tag, bool sent, bool acked) override { if (sink_) sink_->onOtaTx(tag, sent, acked); }
+    void onOtaFrame(int dev, int8_t rssi, const uint8_t* payload, size_t len) override { if (sink_) sink_->onOtaFrame(dev, rssi, payload, len); }
     void onMigrate(uint8_t stage, int dev, bool ok, uint8_t ch, uint8_t okCount, uint8_t failCount, bool committed) override;
     void onLinkTest(const Fog::LinkTestResult& r) override;
     void onHomeChannel(uint8_t ch) override;

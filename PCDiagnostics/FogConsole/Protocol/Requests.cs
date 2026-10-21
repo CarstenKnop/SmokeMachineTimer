@@ -156,6 +156,21 @@ public static class Requests
 
     public static JsonObject Reboot() => Simple("reboot");
 
+    /// <summary>Largest OTA frame payload (FogLink frame minus header and CRC).</summary>
+    public const int OtaMaxPayload = 242;
+
+    /// <summary>Tunnels one over-the-air update frame to a timer (<paramref name="payload"/> = <c>[op][session][body]</c>). The response comes after the radio finished.</summary>
+    public static JsonObject OtaTx(CommandTarget target, ReadOnlySpan<byte> payload)
+    {
+        var o = new JsonObject { ["t"] = "otaTx" };
+        target.WriteTo(o);
+        o["d"] = Convert.ToBase64String(payload);
+        return o;
+    }
+
+    /// <summary>Keeps the remote from starting radio activities that would disturb a firmware transfer (it expires by itself after about 15 s).</summary>
+    public static JsonObject OtaHold(bool on) => new() { ["t"] = "otaHold", ["on"] = on };
+
     public static JsonObject FactoryReset(string scope) => new() { ["t"] = "factoryReset", ["scope"] = scope, ["confirm"] = true };
 
     /// <summary>Serialises a request, assigning its id.</summary>

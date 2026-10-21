@@ -79,6 +79,10 @@ void RemoteLink::removeDevice(int idx) {
         }
     }
     if (txDev_ == idx) txDev_ = -1; else if (txDev_ > idx) --txDev_;
+    for (int k = otaCount_ - 1; k >= 0; --k) {            // queued update frames follow the list; those for the removed timer are dropped
+        if (ota_[k].dev == idx) { if (ota_[k].inFlight) ota_[k].dev = -1; else dropOta(k, false, false); }
+        else if (ota_[k].dev > idx) --ota_[k].dev;
+    }
     for (int i = idx; i + 1 < count_; ++i) dev_[i] = dev_[i + 1];
     dev_[count_ - 1] = Device();
     --count_;
@@ -322,6 +326,12 @@ void RemoteLink::onTxResult(bool ok, uint32_t nowMs) {
             lt_.txPending = false;
             if (ok) ++lt_.macAck;
             break;
+        case TxKind::Ota:
+            if (otaCount_ > 0 && ota_[0].inFlight) {
+                if (ok) ++cnt_.otaTxAcked;
+                dropOta(0, true, ok);
+            }
+            break;
         default:
             break;
     }
@@ -411,6 +421,12 @@ void RemoteLink::onFrame(const uint8_t* mac, int8_t rssi, const uint8_t* data, s
         InfoPayload info;
         if (!readPayload(f, info)) { ++cnt_.rxBad; return; }
         handleInfo(mac, info, nowMs);
+    } else if (f.type == Type::Ota) {
+        const int idx = findDevice(mac);
+        if (idx >= 0) {
+            ++cnt_.otaRx;
+            if (ev_) ev_->onOtaFrame(idx, rssi, f.payload, f.len);
+        }
     }
 }
 
@@ -547,12 +563,14 @@ void RemoteLink::checkOnline(uint32_t now) {
 
 void RemoteLink::probeNow() { probePending_ = true; }
 
-void RemoteLink::startDiscovery(bool sweepChannels) {
+bool RemoteLink::startDiscovery(bool sweepChannels) {
+    if (otaHeld()) return false;
     discovery_ = true;
     discoverySweep_ = sweepChannels;
     nextDiscoveryProbe_ = now_;
     nextSweepAt_ = now_ + 1500;
     for (Heard& h : heard_) h.emitMs = 0;
+    return true;
 }
 
 void RemoteLink::stopDiscovery() {
@@ -560,9 +578,11 @@ void RemoteLink::stopDiscovery() {
     if (exc_.kind == Exc::Discover) endExcursion(now_);
 }
 
-void RemoteLink::startRecover(int dev) {
+bool RemoteLink::startRecover(int dev) {
+    if (otaHeld()) return false;
     recoverReq_ = true;
     recoverDev_ = static_cast<int8_t>(dev);
+    return true;
 }
 
 void RemoteLink::setHome(uint8_t ch) {
@@ -600,6 +620,7 @@ void RemoteLink::tick(uint32_t now) {
     }
 
     if (!txBusy_) trySendJob(now);
+    if (!txBusy_) trySendOta(now);
 
     if (!txBusy_ && probePending_) {
         ProbePayload p = {static_cast<uint8_t>(port_.random(256)), kProbeJitter};
@@ -609,7 +630,7 @@ void RemoteLink::tick(uint32_t now) {
     tickDiscovery(now);
     tickLinkTest(now);
 
-    if (!txBusy_ && recoverReq_ && exc_.kind == Exc::None && !mig_.active) {
+    if (!txBusy_ && recoverReq_ && exc_.kind == Exc::None && !mig_.active && !otaHeld()) {
         recoverReq_ = false;
         exc_ = Excursion();
         exc_.qLen = 0;
@@ -632,14 +653,14 @@ void RemoteLink::tickDiscovery(uint32_t now) {
         if (sendRaw(nullptr, Type::Probe, &p, sizeof(p), false)) { txBusy_ = true; txStart_ = now; txKind_ = TxKind::Other; txDev_ = -1; }
         return;
     }
-    if (discoverySweep_ && queuedJobs() == 0 && static_cast<int32_t>(now - nextSweepAt_) >= 0) {
+    if (discoverySweep_ && queuedJobs() == 0 && !otaHeld() && static_cast<int32_t>(now - nextSweepAt_) >= 0) {
         nextSweepAt_ = now + 4500;
         beginExcursion(Exc::Discover, now);
     }
 }
 
 void RemoteLink::tickAutoRecover(uint32_t now) {
-    if (!autoRecover_ || exc_.kind != Exc::None || txBusy_ || mig_.active || lt_.active || discovery_ || recoverReq_) return;
+    if (!autoRecover_ || exc_.kind != Exc::None || txBusy_ || mig_.active || lt_.active || discovery_ || recoverReq_ || otaHeld()) return;
     if (queuedJobs() > 0) return;
     for (int i = 0; i < count_; ++i) {
         Device& d = dev_[i];
@@ -782,7 +803,7 @@ void RemoteLink::tickExcursion(uint32_t now) {
 
 // ------------------------------------------------------------------ fleet channel migration
 bool RemoteLink::startMigrate(uint8_t ch, bool force) {
-    if (mig_.active || exc_.kind != Exc::None || !validChannel(ch) || ch == home_) return false;
+    if (otaHeld() || mig_.active || exc_.kind != Exc::None || !validChannel(ch) || ch == home_) return false;
     mig_ = Migrate();
     mig_.active = true;
     mig_.force = force;
@@ -828,7 +849,7 @@ void RemoteLink::finishMigrate(uint32_t now) {
 
 // ------------------------------------------------------------------ link test
 bool RemoteLink::startLinkTest(int dev, uint16_t count, uint16_t gapMs) {
-    if (lt_.active || dev < 0 || dev >= count_) return false;
+    if (otaHeld() || lt_.active || dev < 0 || dev >= count_) return false;
     lt_ = LinkTest();
     lt_.active = true;
     lt_.dev = static_cast<int8_t>(dev);
@@ -873,6 +894,50 @@ void RemoteLink::tickLinkTest(uint32_t now) {
     lt_.waiting = true;
     lt_.txPending = true;
     lt_.echoed = false;
+}
+
+// ------------------------------------------------------------------ firmware update bridge
+RemoteLink::OtaSubmit RemoteLink::submitOta(int dev, const uint8_t* payload, size_t len, uint32_t tag) {
+    if (dev < 0 || dev >= count_) return OtaSubmit::BadDevice;
+    if (!payload || len == 0 || len > kMaxPayload) return OtaSubmit::TooLong;
+    setOtaHold(true);                                  // the PC is talking: keep the radio free of side activities
+    if (otaCount_ >= kOtaQueue) { ++cnt_.otaQueueFull; return OtaSubmit::Full; }
+    OtaItem& it = ota_[otaCount_++];
+    it.inFlight = false;
+    it.dev = static_cast<int8_t>(dev);
+    it.len = static_cast<uint8_t>(len);
+    memcpy(it.data, payload, len);
+    it.tag = tag;
+    return OtaSubmit::Ok;
+}
+
+void RemoteLink::setOtaHold(bool on) {
+    if (!on) { otaHoldUntil_ = 0; return; }
+    otaHoldUntil_ = now_ + kOtaHoldMs;
+    if (!otaHoldUntil_) otaHoldUntil_ = 1;
+}
+
+// Sends the oldest queued frame. Not while the radio is away from the home channel or a channel move is under way.
+bool RemoteLink::trySendOta(uint32_t now) {
+    if (otaCount_ == 0 || exc_.kind != Exc::None || mig_.active) return false;
+    OtaItem& it = ota_[0];
+    if (it.inFlight) return false;
+    if (it.dev < 0 || it.dev >= count_) { dropOta(0, false, false); return false; }
+    if (!sendRaw(dev_[it.dev].mac, Type::Ota, it.data, it.len, true)) return false;    // radio busy: try again next pass
+    txBusy_ = true;
+    txStart_ = now;
+    txKind_ = TxKind::Ota;
+    txDev_ = it.dev;
+    it.inFlight = true;
+    ++cnt_.otaTx;
+    return true;
+}
+
+void RemoteLink::dropOta(int index, bool sent, bool acked) {
+    const uint32_t tag = ota_[index].tag;
+    for (int k = index; k + 1 < otaCount_; ++k) ota_[k] = ota_[k + 1];
+    ota_[--otaCount_] = OtaItem();
+    if (ev_) ev_->onOtaTx(tag, sent, acked);
 }
 
 }  // namespace Fog

@@ -66,6 +66,9 @@ public sealed class FirmwareSet
     public uint NvsSize { get; init; } = DefaultNvsSize;
     public uint MaxAppSize { get; init; } = 0x300000;
 
+    /// <summary>The partition table has an OTA data partition (a layout with two application slots): then every write also selects slot 0.</summary>
+    public bool HasOtaData { get; init; }
+
     /// <summary>The boot loader and partition table are present, so "Reinstall" is possible.</summary>
     public bool CanReinstall => Bootloader is not null && PartitionTableBin is not null;
 
@@ -104,9 +107,11 @@ public sealed class FirmwareSet
         switch (mode)
         {
             case FlashMode.Update:
+                // With two application slots the OTA data says which one boots. A device that was last updated over the air may run
+                // from slot 1: writing slot 0 and resetting the OTA data makes sure the firmware that was just written is the one that starts.
                 return new FlashPlan
                 {
-                    Segments = new[] { app },
+                    Segments = HasOtaData ? new[] { OtaDataSegment(), app } : new[] { app },
                     Guard = PartitionTableBin is { } pt && CanReinstall
                         ? new LayoutGuard(PartitionTable.DefaultOffset, (uint)pt.Length, Convert.ToHexString(MD5.HashData(pt)).ToLowerInvariant(), full)
                         : null,
@@ -127,14 +132,14 @@ public sealed class FirmwareSet
         var list = new List<FlashSegment>();
         if (Bootloader is not null) list.Add(new FlashSegment(0, Bootloader, "boot loader"));
         if (PartitionTableBin is not null) list.Add(new FlashSegment(PartitionTable.DefaultOffset, PartitionTableBin, "partition table"));
-        if (PartitionTableBin is not null)
-        {
-            // without a boot_app0 file the OTA data is left erased, which makes the boot loader start the first application
-            list.Add(new FlashSegment(BootApp0Offset, BootApp0 ?? Enumerable.Repeat((byte)0xFF, 0x2000).ToArray(), "OTA data"));
-        }
+        if (PartitionTableBin is not null) list.Add(OtaDataSegment());
         list.Add(new FlashSegment(AppOffset, App, "application"));
         return list;
     }
+
+    /// <summary>boot_app0.bin (slot 0 boots). Without that file the OTA data is left erased, which makes the boot loader start the first application as well.</summary>
+    private FlashSegment OtaDataSegment() =>
+        new(BootApp0Offset, BootApp0 ?? Enumerable.Repeat((byte)0xFF, 0x2000).ToArray(), "OTA data");
 
     // ---- loading ---------------------------------------------------------------------------------------------------
 
@@ -189,6 +194,7 @@ public sealed class FirmwareSet
             Bootloader = Optional("bootloader.bin"),
             PartitionTableBin = partitions,
             BootApp0 = Optional("boot_app0.bin", PlatformIoBootApp0Folders().ToArray()),
+            HasOtaData = ota is not null,
             FileTimeUtc = File.GetLastWriteTimeUtc(app),
             AppOffset = appPart?.Offset ?? DefaultAppOffset,
             MaxAppSize = appPart?.Size ?? 0x300000,
@@ -249,6 +255,7 @@ public sealed class FirmwareSet
             Bootloader = bytes.AsSpan(0, (int)PartitionTable.DefaultOffset).ToArray(),
             PartitionTableBin = bytes.AsSpan((int)PartitionTable.DefaultOffset, PartitionTable.MaxLength).ToArray(),
             BootApp0 = ota is null ? null : bytes.AsSpan((int)ota.Offset, (int)Math.Min(ota.Size, (uint)(bytes.Length - ota.Offset))).ToArray(),
+            HasOtaData = ota is not null,
             FileTimeUtc = File.GetLastWriteTimeUtc(file),
             AppOffset = appOffset,
             MaxAppSize = appPart?.Size ?? 0x300000,

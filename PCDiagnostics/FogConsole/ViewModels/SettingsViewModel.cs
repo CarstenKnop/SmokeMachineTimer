@@ -29,6 +29,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IPageViewModel
         _logBufferSize = s.LogBufferSize;
         _packetBufferSize = s.PacketBufferSize;
         _simKindIndex = s.SimulatorKind == "Timer" ? 1 : 0;
+        _otaKey = s.OtaKey;
         app.Fleet.Remote.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(RemoteInfoViewModel.Kind) or nameof(RemoteInfoViewModel.Millivolts))
@@ -242,6 +243,14 @@ public sealed partial class SettingsViewModel : ObservableObject, IPageViewModel
     [ObservableProperty] private int _logBufferSize;
     [ObservableProperty] private int _packetBufferSize;
     [ObservableProperty] private int _simKindIndex;
+    [ObservableProperty] private string _otaKey;
+
+    partial void OnOtaKeyChanged(string value)
+    {
+        // an empty key means the default one; the timers must have been built with the same text
+        _app.Settings.Current.OtaKey = string.IsNullOrWhiteSpace(value) ? "FogLink-OTA-v1" : value.Trim();
+        _app.Settings.SaveSoon();
+    }
 
     partial void OnThemeChanged(string value)
     {

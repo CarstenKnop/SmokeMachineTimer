@@ -13,12 +13,14 @@
 #include <string>
 #include <vector>
 
+#include "FogBase64.h"
 #include "FogCycle.h"
 #include "FogLinkStats.h"
 #include "FogProto.h"
 #include "FogRemoteLink.h"
 #include "FogTimerNode.h"
 #include "FogUtil.h"
+#include "ota_test_support.h"
 
 using namespace Fog;
 
@@ -129,9 +131,12 @@ struct SimTimer : TimerPlatform {
     bool lastOut = false;
     uint32_t identifyMs = 0;
     int rebootRequests = 0, erases = 0;
+    OtaTest::RamTarget otaFlash{0x40000};          // the update slot: survives power cuts, like the real flash
+    int quiesces = 0;
 
     SimTimer(SimNet& n, uint8_t id) : net(n), node(n, id), rng(1000 + id) {
         snprintf(saved.name, sizeof(saved.name), "T%u", id);
+        otaFlash.clock = [this]() { return net.now; };
     }
     void powerOn() {
         node.powered = true;
@@ -163,6 +168,8 @@ struct SimTimer : TimerPlatform {
     void identify(uint16_t ms) override { identifyMs = ms; }
     void fillInfo(InfoPayload& info) override { info.uptimeS = 1; info.freeHeap = 100000; }
     uint32_t random(uint32_t n) override { return n ? rng() % n : 0; }
+    OtaTarget* otaTarget() override { return &otaFlash; }
+    void quiesceOutput() override { ++quiesces; }
 };
 
 // --------------------------------------------------------------------------- remote harness
@@ -177,6 +184,8 @@ struct Harness : RemotePort, RemoteEvents {
     std::vector<int> online, offline, rebooted;
     std::vector<std::string> migrateLog;
     LinkTestResult lastLt = {};
+    std::function<void(int, const OtaTest::Bytes&)> otaRxHook;                // Type::Ota frames from timers
+    std::function<void(uint32_t, bool, bool)> otaTxHook;                      // result of a frame queued with submitOta
     bool ltDone = false;
     bool remoteAwake = true;
     int migCommitted = -1;
@@ -225,6 +234,8 @@ struct Harness : RemotePort, RemoteEvents {
         if (stage == 2) migCommitted = committed ? 1 : 0;
     }
     void onLinkTest(const LinkTestResult& r) override { lastLt = r; if (r.done) ltDone = true; }
+    void onOtaTx(uint32_t tag, bool sent, bool acked) override { if (otaTxHook) otaTxHook(tag, sent, acked); }
+    void onOtaFrame(int dev, int8_t, const uint8_t* payload, size_t len) override { if (otaRxHook) otaRxHook(dev, OtaTest::Bytes(payload, payload + len)); }
 
     void run(uint32_t ms) {
         const uint32_t end = net.now + ms;
@@ -785,6 +796,8 @@ static void testStaleClockWhileSurveying() {
     CHECK(d && d->result == JobResult::Ok, "the command gets its full time budget (result %d)", d ? static_cast<int>(d->result) : -1);
 }
 
+#include "ota_tests.inl"
+
 int main() {
     testProto();
     testCycle();
@@ -807,6 +820,7 @@ int main() {
     testRemoveDuringActivity();
     testStaleClockWhileSurveying();
     testUtil();
+    testOtaAll();
     testSoak();
     std::printf("\n%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

@@ -22,6 +22,9 @@ public sealed record ResponseMessage : Message
     /// <summary>Number of jobs queued (for <c>cmd</c> requests).</summary>
     public int? Queued { get; init; }
 
+    /// <summary>For <c>otaTx</c>: the timer's MAC acknowledged the frame (null when the response carries no such field).</summary>
+    public bool? Acked { get; init; }
+
     /// <summary>Device millis() (for <c>ping</c>).</summary>
     public long? DeviceMs { get; init; }
 
@@ -50,7 +53,14 @@ public sealed record HelloInfo(
     int Boots,
     long Heap,
     string Build,
-    int MaxDevs);
+    int MaxDevs,
+    IReadOnlyList<string>? Caps = null)
+{
+    /// <summary>The capabilities the device lists in <c>hello</c> (e.g. <c>ota</c>: firmware update frames can be tunnelled / received).</summary>
+    public bool Has(string capability) => Caps is not null && Caps.Contains(capability, StringComparer.OrdinalIgnoreCase);
+
+    public bool SupportsOta => Has("ota");
+}
 
 /// <summary>Settings of the remote (or of a directly connected timer). Missing values are null.</summary>
 public sealed record RemoteSettings
@@ -155,6 +165,12 @@ public sealed record StatsMessage(StatsSnapshot Snapshot) : Message;
 
 /// <summary>The <c>devStat</c> event: link and timer counters of one paired timer (sent right after every <c>stats</c> event).</summary>
 public sealed record DevStatMessage(DevStatsEntry Entry) : Message;
+
+/// <summary>
+/// The <c>otaRx</c> event: one over-the-air update frame from a paired timer (or from a timer on USB, <c>dev</c> 0). <see cref="Payload"/> is the
+/// OTA frame payload <c>[op][session][body]</c> (see docs/OTA_UPDATE.md).
+/// </summary>
+public sealed record OtaRxMessage(int Dev, string Mac, int Rssi, byte[] Payload) : Message;
 
 /// <summary>Anything with a type we do not know (kept so the Raw console can still show it).</summary>
 public sealed record UnknownMessage(string Type, JsonElement Body) : Message;

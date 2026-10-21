@@ -82,6 +82,7 @@ public sealed partial class SimDevice
         if (_opt.Kind == SimKind.Timer)
         {
             var t = new SimTimer(ToWireMac(1), "FogTimer") { Channel = _homeCh, Boot = 7, Slot = 0, RstPowerOn = 7 };
+            t.Ota = new SimOtaReceiver(_opt.OtaKey);
             t.Phase = CyclePhase.Off;
             t.UptimeMs = 3_600_000;
             t.C.AddRssi(-58);
@@ -109,6 +110,9 @@ public sealed partial class SimDevice
                 Slot = i,
             };
             t.BaseRssiT = t.BaseRssi + _rng.Next(-3, 4);
+            t.Ota = new SimOtaReceiver(_opt.OtaKey);
+            if (paired && i == _opt.OtaNoSlotIndex) t.Ota.HasSlot = false;
+            if (paired && i == _opt.OtaLegacyIndex) { t.Fw = "2.0.0"; t.Ota.Supported = false; }
             t.RstPowerOn = t.Boot;
             t.RstBrownout = t.Boot > 3 ? _rng.Next(0, 2) : 0;
             t.RstSw = _rng.Next(0, 3);
@@ -198,6 +202,7 @@ public sealed partial class SimDevice
         StepBeats();
         StepOnline();
         StepPolls();
+        StepOta();
         StepDiscovery();
         StepInfoPoll();
         StepMisc();

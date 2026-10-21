@@ -22,4 +22,9 @@ Fog Console can flash it too (page *Firmware*, [`docs/FIRMWARE_UPDATE.md`](../do
 | `src/config/`, `src/battery/` | NVS settings, battery voltage/percent |
 | `../lib/FogLink/` | protocol, radio, storage, USB link (shared with the timer) |
 
+**Firmware update of the timers:** the remote is the radio bridge for it. Fog Console sends the image over USB, the remote forwards the frames to one paired timer
+(`otaTx` / `otaRx` / `otaHold` in [`docs/SERIAL_PROTOCOL.md`](../docs/SERIAL_PROTOCOL.md), design in [`docs/OTA_UPDATE.md`](../docs/OTA_UPDATE.md)). The remote keeps no part of the
+image; while an update runs it stays on the home channel and refuses discovery, channel moves, link tests and recovery sweeps (a toast says *Update running*).
+The remote itself is updated over USB. Both firmwares use the two-slot layout `../partitions/fog_ota.csv`.
+
 Controls and screens are explained with pictures in the [user manual](../docs/MANUAL.md).

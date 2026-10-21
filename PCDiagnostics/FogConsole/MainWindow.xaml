@@ -16,7 +16,8 @@
         <KeyBinding Key="D4" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Channels"/>
         <KeyBinding Key="D5" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Diagnostics"/>
         <KeyBinding Key="D6" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Console"/>
-        <KeyBinding Key="D7" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Settings"/>
+        <KeyBinding Key="D7" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Firmware"/>
+        <KeyBinding Key="D8" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Settings"/>
         <KeyBinding Key="F5" Command="{Binding RefreshPortsCommand}"/>
     </Window.InputBindings>
 
@@ -27,6 +28,7 @@
         <DataTemplate DataType="{x:Type vm:ChannelsViewModel}"><v:ChannelsView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:DiagnosticsViewModel}"><v:DiagnosticsView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:ConsoleViewModel}"><v:ConsoleView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:FirmwareViewModel}"><v:FirmwareView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><v:SettingsView/></DataTemplate>
 
         <!-- navigation rail entry -->

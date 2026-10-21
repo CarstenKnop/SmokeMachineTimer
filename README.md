@@ -48,6 +48,8 @@ for radios that have to work in a noisy 2.4 GHz environment.
 
 **Fog Console (Windows)**
 * Dashboard with one card per timer, **hold-to-fog**, bulk actions, stagger start.
+* **Firmware update over USB** for the remote and every timer: recognises timer/remote images, checks and verifies them, keeps
+  settings and pairing — no PlatformIO needed.
 * Device pages, pairing, channel survey / migration / link lab, **diagnostics with counters and health hints**, packet inspector,
   raw console, remote settings.
 * **Offline demo mode** with a simulated fleet — try everything without hardware.
@@ -101,6 +103,10 @@ All 46 screens are in [`docs/images/oled`](docs/images/oled).
 <td><img src="PCDiagnostics/docs/channels-dark.png" width="480"><br><sub><b>Channels</b> – survey, migration, link lab</sub></td>
 <td><img src="PCDiagnostics/docs/diagnostics-dark.png" width="480"><br><sub><b>Diagnostics</b> – counters of the remote and every timer</sub></td>
 </tr>
+<tr>
+<td><img src="PCDiagnostics/docs/firmware-flashing-dark.png" width="480"><br><sub><b>Firmware</b> – update a device over USB (shown on the simulated chip)</sub></td>
+<td><img src="PCDiagnostics/docs/pairing-dark.png" width="480"><br><sub><b>Pairing</b> – discover and pair timers</sub></td>
+</tr>
 </table>
 
 More in the [Fog Console manual](docs/FOG_CONSOLE_MANUAL.md).
@@ -113,6 +119,8 @@ More in the [Fog Console manual](docs/FOG_CONSOLE_MANUAL.md).
    pio run -d FogMachineTimer -t upload
    pio run -d FogMachineRemoteControl -t upload
    ```
+   Or, without PlatformIO, from Fog Console: plug the device in, open **Firmware** (`Ctrl+7`), pick the image, **Flash firmware**
+   ([how](docs/FIRMWARE_UPDATE.md)).
 3. **Pair:** on the remote hold `#` → *Pair Timer* → pick a timer → `#`. Rename it, set the times (`#` on the main screen).
 4. **Try it:** hold `*` to fog, tap `*` to toggle the cycle.
 5. **PC tool:** connect the remote by USB and run
@@ -140,6 +148,7 @@ Only UP/DOWN (GPIO 3/4) can wake the ESP32-C3 from deep sleep. **Check the timer
 |----------|-----|
 | [**User manual**](docs/MANUAL.md) ([HTML](docs/MANUAL.html)) | Using the remote and the timers: setup, buttons, every menu screen, troubleshooting |
 | [**Fog Console manual**](docs/FOG_CONSOLE_MANUAL.md) | The Windows tool, page by page, with screenshots |
+| [**Firmware update**](docs/FIRMWARE_UPDATE.md) | Updating the remote and the timers over USB: modes, flash map, safety, recovery, how it works |
 | **Design specifications** | |
 | [Radio protocol & design (FogLink 2)](docs/RADIO_PROTOCOL.md) | Frame format, delivery model, channels, power-cut behaviour, why the old link failed |
 | [USB protocol (FogSerial/2)](docs/SERIAL_PROTOCOL.md) | JSON-lines protocol between the PC tool and a remote/timer, incl. performance counters |
@@ -157,6 +166,7 @@ docs/                       manuals, specifications, pictures
 tools/native-tests/         host-side protocol simulation (198 checks)
 tools/oled-preview/         renders every OLED screen to PNG with the real drawing code
 tools/make-manual-html.py   builds docs/MANUAL.html
+tools/package-firmware.ps1  builds both firmwares and stages them for Fog Console's Firmware page
 src/, platformio.ini, ...   (repository root) the ORIGINAL single-device SmokeMachineTimer — untouched, see docs/legacy
 ```
 
@@ -171,6 +181,7 @@ dotnet test  PCDiagnostics/FogConsole.sln  # PC tool tests
 powershell -File tools/native-tests/run.ps1    # protocol simulation: the REAL timer + remote code vs. a lossy radio
 powershell -File tools/oled-preview/run.ps1    # render all OLED screens (needs one firmware build first)
 python tools/make-manual-html.py               # rebuild docs/MANUAL.html (pip install markdown)
+powershell -File tools/package-firmware.ps1    # build both firmwares and stage them next to Fog Console
 ```
 
 The PlatformIO platform is pinned (`espressif32@8.0.0` → Arduino-ESP32 3.3, ESP-IDF 5.5) so builds are reproducible; the first
@@ -190,7 +201,9 @@ unattended. The radio link is **not encrypted** — see [manual §2](docs/MANUAL
 ## Status
 
 Firmware 2.0 compiles for both targets and the protocol logic is verified by host simulation. It has **not yet been run on
-hardware**; test with the machines disconnected first and please report what you find.
+hardware**; test with the machines disconnected first and please report what you find. The same goes for the USB firmware
+update in Fog Console: its flasher is tested against the real esptool and a simulated chip, but not yet on a real board
+([what has been verified](docs/FIRMWARE_UPDATE.md#8-what-has-been-verified)).
 
 ## License
 

@@ -29,4 +29,9 @@
     <InternalsVisibleTo Include="FogConsole.Tests" />
   </ItemGroup>
 
+  <!-- Firmware images staged by tools\package-firmware.ps1 (firmware\timer and firmware\remote): shipped next to the exe for the Firmware page. -->
+  <ItemGroup>
+    <None Include="firmware\**\*.bin" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
 </Project>

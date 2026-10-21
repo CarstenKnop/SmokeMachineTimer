@@ -13,6 +13,12 @@ public interface IDialogService
     /// <summary>Returns the chosen path or null.</summary>
     string? PickSaveFile(string title, string filter, string defaultFileName);
 
+    /// <summary>Returns the chosen existing file or null.</summary>
+    string? PickOpenFile(string title, string filter);
+
+    /// <summary>Returns the chosen folder or null.</summary>
+    string? PickFolder(string title);
+
     void CopyText(string text);
 
     void SaveText(string path, string text);
@@ -32,6 +38,18 @@ public sealed class WpfDialogService : IDialogService
     {
         var dlg = new SaveFileDialog { Title = title, Filter = filter, FileName = defaultFileName, OverwritePrompt = true };
         return dlg.ShowDialog() == true ? dlg.FileName : null;
+    }
+
+    public string? PickOpenFile(string title, string filter)
+    {
+        var dlg = new OpenFileDialog { Title = title, Filter = filter, CheckFileExists = true };
+        return dlg.ShowDialog() == true ? dlg.FileName : null;
+    }
+
+    public string? PickFolder(string title)
+    {
+        var dlg = new OpenFolderDialog { Title = title };
+        return dlg.ShowDialog() == true ? dlg.FolderName : null;
     }
 
     public void CopyText(string text)
@@ -69,6 +87,10 @@ public sealed class ScriptedDialogService : IDialogService
     }
 
     public string? PickSaveFile(string title, string filter, string defaultFileName) => SavePath;
+    public string? OpenPath { get; set; }
+    public string? FolderPath { get; set; }
+    public string? PickOpenFile(string title, string filter) => OpenPath;
+    public string? PickFolder(string title) => FolderPath;
     public void CopyText(string text) => Clipboard = text;
     public void SaveText(string path, string text) => Saved[path] = text;
 }

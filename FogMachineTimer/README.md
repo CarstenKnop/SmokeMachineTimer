@@ -8,6 +8,9 @@ pio run -d FogMachineTimer                 # build
 pio run -d FogMachineTimer -t upload       # flash the connected board
 ```
 
+Fog Console can flash it too (page *Firmware*, [`docs/FIRMWARE_UPDATE.md`](../docs/FIRMWARE_UPDATE.md)). It recognises the image by the identity string
+`FOGFW|timer|<version>|` that `src/main.cpp` compiles in (`FOG_FW_IDENT`, [`lib/FogLink/FogIdent.h`](../lib/FogLink/FogIdent.h)).
+
 | File | Role |
 |------|------|
 | `src/main.cpp` | start-up order (safe output first, NVS, radio, watchdog) and the loop |

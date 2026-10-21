@@ -8,6 +8,7 @@
 #include <esp_sleep.h>
 #include <esp_task_wdt.h>
 
+#include "FogIdent.h"
 #include "FogLog.h"
 #include "FogSys.h"
 #include "Pins.h"
@@ -22,6 +23,8 @@
 #include "ui/UiModel.h"
 
 using namespace Fog;
+
+FOG_FW_IDENT("remote");                             // lets Fog Console recognise this image before flashing it
 
 static RemoteSettings settings;
 static Fleet fleet(settings);

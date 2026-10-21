@@ -33,6 +33,11 @@ public partial class DiagnosticsView : UserControl
     public DiagnosticsView() => InitializeComponent();
 }
 
+public partial class FirmwareView : UserControl
+{
+    public FirmwareView() => InitializeComponent();
+}
+
 public partial class SettingsView : UserControl
 {
     public SettingsView() => InitializeComponent();

@@ -54,11 +54,14 @@ un-maximize it. The layout adapts from 1000 px up to 4K: dashboard cards reflow 
 6. **Diagnostics** - the performance counters of every radio, on both ends of each link (see below).
 7. **Console** - *Log* (device log with level filter), *Packets* (every radio frame the remote sees) and *Raw* (every
    line on the USB cable in both directions, plus a box to send your own JSON line).
-8. **Settings** - the remote's settings (TX power, brightness, auto-off, signal bar range, battery calibration; for a
+8. **Firmware** - update the remote or a timer over its USB cable: the firmware is recognised (timer or remote, version), checked
+   (ESP32-C3 image, checksum, SHA-256), written through the chip's ROM bootloader and verified by the chip's MD5; settings and pairing
+   survive an *Update*. *Check device* identifies the chip and compares the flash without writing. See [`docs/FIRMWARE_UPDATE.md`](../docs/FIRMWARE_UPDATE.md).
+9. **Settings** - the remote's settings (TX power, brightness, auto-off, signal bar range, battery calibration; for a
    timer on USB its name, durations and start phase) and this application's preferences (theme, buffer sizes,
    simulator options).
 
-Keyboard: `Ctrl+1` ... `Ctrl+7` switch pages, `F5` rescans the COM ports.
+Keyboard: `Ctrl+1` ... `Ctrl+8` switch pages, `F5` rescans the COM ports.
 Settings are stored in `%AppData%\FogConsole\settings.json`; unexpected errors are written to
 `%AppData%\FogConsole\crash.log`.
 
@@ -110,7 +113,7 @@ The counter stream (`statsCfg`) is switched on only while the page is visible an
 
 ```
 FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
-               [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Settings] [--select N]
+               [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Firmware|Settings] [--select N]
                [--theme light|dark|system] [--size WxH] [--no-chaos] [--no-demo] [--no-settings]
                [--shot out.png [--shot-scale 1]] [--delay secs] [--exit] [--action name] [--scroll px]
 ```
@@ -128,7 +131,7 @@ FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
 | `--no-settings` | do not read or write the settings file (implied by `--shot`) |
 | `--shot file.png` | render the window to a PNG after `--delay` seconds (default 4); `--shot-scale 1` = one pixel per DIP (small files) |
 | `--exit` | quit after the screenshot; without `--shot` run for `--delay` seconds and quit (a quick smoke test, exit code 0 = no crash) |
-| `--action name` | prepare a situation before the shot: `survey`, `linktest`, `migrate`, `fail`, `baseline`, `hold`, `forceon`, `rename`, `device`, `console`, `packets`, `raw`, `discover`, `simpanel`, `showcase` |
+| `--action name` | prepare a situation before the shot: `survey`, `linktest`, `migrate`, `fail`, `baseline`, `hold`, `forceon`, `rename`, `device`, `console`, `packets`, `raw`, `discover`, `simpanel`, `showcase`, `firmware`, `firmwareflash`, `firmwaredone` |
 | `--scroll px` | scroll the page content before the shot |
 
 The pictures above come from `docs\make-screenshots.ps1`, which runs the app with `--sim --seed 42` once per page and theme
@@ -144,10 +147,13 @@ PCDiagnostics/
     Transport/                 ITransport, line framing, serial port (+ friendly port names)
     Hub/                       HubClient: request/response matching, keep-alive, reconnect, command tracking
     Simulator/                 virtual remote + timers + 2.4 GHz band (deterministic, seeded)
+    Flashing/                  USB firmware update: SLIP + ROM bootloader client (esptool protocol), image/partition parsing,
+                               firmware catalog, flash plans, simulated chip (SimulatedRom) and demo images
     Diagnostics/               counter maths, health rules, channel quality, snapshot compare/export
     Services/                  settings, theme, toasts, command center, hold-to-fog, dialogs, screenshots, startup options
     ViewModels/  Views/  Controls/  Converters/  Theme/
-  FogConsole.Tests/            xUnit: protocol, framing, hub, simulator, diagnostics, view models, end-to-end
+  FogConsole.Tests/            xUnit: protocol, framing, hub, simulator, diagnostics, flashing (incl. the real esptool against the
+                               simulated chip), view models, end-to-end
   docs/                        screenshots + make-screenshots.ps1
 ```
 

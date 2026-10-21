@@ -288,6 +288,29 @@ internal static class ScreenshotScript
                     await Task.Delay(550);
                     break;
                 }
+            case "firmware":
+            case "firmwareflash":
+            case "firmwaredone":
+                {
+                    // only the built-in demo images (no paths of this machine in the picture)
+                    vm.Firmware.AppDirectory = Path.GetTempPath();
+                    vm.Navigate(NavPage.Firmware);
+                    await vm.Firmware.RefreshAllCommand.ExecuteAsync(null);
+                    vm.Firmware.Selected = vm.Firmware.Choices.FirstOrDefault(c => c.Set.Kind == Flashing.FirmwareKind.Remote) ?? vm.Firmware.Selected;
+                    if (action == "firmware") break;
+
+                    vm.Firmware.Mode = Flashing.FlashMode.Reinstall;
+                    if (action == "firmwareflash")
+                    {
+                        vm.Firmware.SimulatedBytesPerSecond = 45_000;
+                        _ = vm.Firmware.FlashCommand.ExecuteAsync(null);
+                        for (int i = 0; i < 200 && vm.Firmware.Progress < 0.55; i++) await Task.Delay(50);
+                        break;
+                    }
+                    await vm.Firmware.FlashCommand.ExecuteAsync(null);
+                    vm.Toasts.Toasts.Clear();
+                    break;
+                }
             case "forceon":
                 vm.Fleet.Devices.FirstOrDefault(d => d.Online)?.HoldStartCommand.Execute(null);
                 await Task.Delay(800);

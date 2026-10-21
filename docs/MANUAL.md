@@ -105,6 +105,8 @@ thermostat cuts the supply).
   Repeat for every timer — the same firmware goes on all of them. Every chip has its own MAC address, which is how the remote
   tells them apart.
 * Connect the remote, open `FogMachineRemoteControl`, **Upload**.
+* **Or without PlatformIO:** Fog Console updates the remote or a timer over its USB cable — page **Firmware**, pick the firmware, press **Flash firmware**
+  (see the [Fog Console manual](FOG_CONSOLE_MANUAL.md#11-firmware) and [`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md)).
 * If a board does not show up as a COM port: hold its **BOOT** button, tap **RESET**, release BOOT, then upload.
   For the remote, holding **UP** while it powers up also opens a 60 s *update window* (screen shows “Firmware Update Mode”).
 
@@ -381,6 +383,7 @@ time; nothing is connected to real machines). The demo needs no hardware.
 | **Channels** | Survey, recommended channels, move the whole system, *Find lost timers*, **link lab** (packet tests per timer) |
 | **Diagnostics** | Performance counters of the remote **and** of every timer (packets sent/lost/retried, queue overflows, loop stalls, power-up and brown-out counts) with health hints, history graphs and a per-channel quality table |
 | **Console** | Log, packet inspector and a raw command line |
+| **Firmware** | Update the remote or a timer over USB: recognises timer and remote firmware, checks and verifies the image, shows which timers still run an older version |
 | **Settings** | Remote settings (TX power, brightness, Auto Off, signal scale, battery calibration) and app preferences |
 
 The remote stays awake while the PC is connected. If the remote sleeps or is unplugged the app waits and reconnects by itself.
@@ -424,8 +427,9 @@ How to read the counters is described in [Troubleshooting](#10-troubleshooting).
 
 ## 11. Maintenance
 
-* **Update firmware:** PlatformIO → *Upload*. The remote can be put into a 60 s *update window* by holding **UP** while powering it
-  up. All settings are kept (they live in non-volatile storage and have a version check).
+* **Update firmware:** Fog Console → **Firmware** → *Flash firmware* (details: [`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md)), or PlatformIO → *Upload*. The remote can be
+  put into a 60 s *update window* by holding **UP** while powering it up. Settings, pairing and names are kept by an *Update* (they live in non-volatile
+  storage and have a version check); only a *Clean install* erases them. Each timer is updated over its own USB cable, on the bench.
 * **Factory reset:** *Reset Timer* / *Reset Remote* in the menu, or from the PC tool.
 * **Battery:** the remote charges over USB. Calibrate the percentage once with a full and an empty battery.
 * **Several systems in one room:** give each system its own channel (**Channel** menu) and pair only your own timers.

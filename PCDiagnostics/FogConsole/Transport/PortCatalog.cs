@@ -3,7 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace FogConsole.Transport;
 
-public sealed record PortInfo(string Name, string Description, bool IsEspressif)
+/// <param name="IsUsbJtag">An ESP32 with the built-in USB-Serial/JTAG controller (USB id 303A:1001), like the XIAO ESP32-C3.</param>
+public sealed record PortInfo(string Name, string Description, bool IsEspressif, bool IsUsbJtag = false)
 {
     public string Display => string.IsNullOrWhiteSpace(Description) || Description.Contains(Name, StringComparison.OrdinalIgnoreCase)
         ? (IsEspressif ? $"{Name}  -  ESP32 (USB)" : Name)
@@ -23,7 +24,7 @@ public static partial class PortCatalog
         try { names = SerialPort.GetPortNames(); }
         catch { names = []; }
 
-        var friendly = new Dictionary<string, (string Desc, bool Esp)>(StringComparer.OrdinalIgnoreCase);
+        var friendly = new Dictionary<string, (string Desc, bool Esp, bool Jtag)>(StringComparer.OrdinalIgnoreCase);
         try
         {
             using var searcher = new System.Management.ManagementObjectSearcher(
@@ -36,7 +37,8 @@ public static partial class PortCatalog
                 if (!m.Success) continue;
                 var com = m.Groups[1].Value;
                 var desc = name.Replace($"({com})", "", StringComparison.OrdinalIgnoreCase).Trim();
-                friendly[com] = (desc, pnp.Contains("VID_303A", StringComparison.OrdinalIgnoreCase));
+                friendly[com] = (desc, pnp.Contains("VID_303A", StringComparison.OrdinalIgnoreCase),
+                    pnp.Contains("VID_303A&PID_1001", StringComparison.OrdinalIgnoreCase));
             }
         }
         catch
@@ -47,7 +49,7 @@ public static partial class PortCatalog
         return names
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(NaturalKey)
-            .Select(n => friendly.TryGetValue(n, out var f) ? new PortInfo(n, f.Desc, f.Esp) : new PortInfo(n, "", false))
+            .Select(n => friendly.TryGetValue(n, out var f) ? new PortInfo(n, f.Desc, f.Esp, f.Jtag) : new PortInfo(n, "", false))
             .ToList();
     }
 

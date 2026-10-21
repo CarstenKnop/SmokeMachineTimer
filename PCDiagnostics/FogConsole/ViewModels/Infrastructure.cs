@@ -5,7 +5,7 @@ using FogConsole.Services;
 
 namespace FogConsole.ViewModels;
 
-public enum NavPage { Dashboard, Device, Pairing, Channels, Diagnostics, Console, Settings }
+public enum NavPage { Dashboard, Device, Pairing, Channels, Diagnostics, Console, Firmware, Settings }
 
 /// <summary>Receives every hub message on the UI thread, in order.</summary>
 public interface IMessageSink

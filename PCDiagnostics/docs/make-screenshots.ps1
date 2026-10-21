@@ -3,7 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File PCDiagnostics\docs\make-screenshots.ps1
 # Needs a built app (dotnet build PCDiagnostics\FogConsole.sln -c Release).
 param(
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$Only = ""          # e.g. -Only firmware: regenerate just the pictures whose name contains this text
 )
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -18,11 +19,13 @@ $shots = @(
     @("Channels",    "channels",    "--action survey",                           8),
     @("Diagnostics", "diagnostics", "--no-chaos",                               22),
     @("Console",     "console",     "--action console",                          3),
+    @("Firmware",    "firmware",    "--paired 10 --no-chaos --action firmware",   8),
     @("Settings",    "settings",    "",                                          6)
 )
 
 foreach ($theme in @("dark", "light")) {
     foreach ($s in $shots) {
+        if ($Only -ne "" -and $s[1] -notlike "*$Only*") { continue }
         $out = Join-Path $PSScriptRoot "$($s[1])-$theme.png"
         if (Test-Path $out) { Remove-Item $out -Force }
         $argList = @("--sim", "--seed", "42", "--page", $s[0], "--theme", $theme,
@@ -43,9 +46,12 @@ $extras = @(
     @("linklab",         "Channels",    "--action linktest --scroll 700",                     14),
     @("diagnostics-low", "Diagnostics", "--no-chaos --scroll 1500",                           22),
     @("packets",         "Console",     "--action packets",                                    8),
-    @("raw",             "Console",     "--action raw",                                        6)
+    @("raw",             "Console",     "--action raw",                                        6),
+    @("firmware-flashing", "Firmware",  "--paired 10 --no-chaos --action firmwareflash",       8),
+    @("firmware-done",   "Firmware",    "--paired 10 --no-chaos --action firmwaredone",        10)
 )
 foreach ($s in $extras) {
+    if ($Only -ne "" -and $s[0] -notlike "*$Only*") { continue }
     $out = Join-Path $PSScriptRoot "$($s[0])-dark.png"
     if (Test-Path $out) { Remove-Item $out -Force }
     $argList = @("--seed", "42", "--page", $s[1], "--theme", "dark", "--shot", $out, "--shot-scale", "1", "--delay", "$($s[3])", "--exit")

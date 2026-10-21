@@ -125,10 +125,11 @@ public sealed partial class MainViewModel : ObservableObject
         Channels = new ChannelsViewModel(app);
         Diagnostics = new DiagnosticsViewModel(app);
         Console = new ConsoleViewModel(app);
+        Firmware = new FirmwareViewModel(app, Ports, RefreshPortsAsync, DisconnectAsync, port => ConnectPortAsync(port, waitIfAbsent: true));
         Settings = new SettingsViewModel(app, () => Console.ApplyBufferSizes());
         SimPanel = new SimulatorPanelViewModel(app, RestartSimulatorAsync);
 
-        Pages = new IPageViewModel[] { Dashboard, Device, Pairing, Channels, Diagnostics, Console, Settings }
+        Pages = new IPageViewModel[] { Dashboard, Device, Pairing, Channels, Diagnostics, Console, Firmware, Settings }
             .ToDictionary(p => p.Page);
         NavItems = new[]
         {
@@ -138,7 +139,8 @@ public sealed partial class MainViewModel : ObservableObject
             new NavItem(NavPage.Channels, "Channels", "", "Channel survey, moving the system, link lab (Ctrl+4)", "Ctrl+4"),
             new NavItem(NavPage.Diagnostics, "Diagnostics", "", "Performance counters of the remote and every timer (Ctrl+5)", "Ctrl+5"),
             new NavItem(NavPage.Console, "Console", "", "Log, packet inspector and raw JSON console (Ctrl+6)", "Ctrl+6"),
-            new NavItem(NavPage.Settings, "Settings", "", "Remote settings, preferences and about (Ctrl+7)", "Ctrl+7"),
+            new NavItem(NavPage.Firmware, "Firmware", "", "Update the firmware of the remote or a timer over USB (Ctrl+7)", "Ctrl+7"),
+            new NavItem(NavPage.Settings, "Settings", "", "Remote settings, preferences and about (Ctrl+8)", "Ctrl+8"),
         };
         _selectedNav = NavItems[0];
         _currentPage = Dashboard;
@@ -175,6 +177,7 @@ public sealed partial class MainViewModel : ObservableObject
     public ChannelsViewModel Channels { get; }
     public DiagnosticsViewModel Diagnostics { get; }
     public ConsoleViewModel Console { get; }
+    public FirmwareViewModel Firmware { get; }
     public SettingsViewModel Settings { get; }
     public SimulatorPanelViewModel SimPanel { get; }
     public IReadOnlyDictionary<NavPage, IPageViewModel> Pages { get; }
@@ -420,6 +423,7 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowConnectionChip));
         OnPropertyChanged(nameof(PortPlaceholder));
         if (!Sim.IsActive) SimPanel.IsOpen = false;
+        Firmware.OnSimulationChanged();
     }
 
     // ---- hub events on the UI thread -------------------------------------------------------
@@ -622,8 +626,18 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool StartedFromCli => _startedFromCli;
 
+    /// <summary>False while a firmware update runs: closing then would leave the device without working firmware.</summary>
+    public bool CanCloseNow()
+    {
+        if (!Firmware.MustNotClose) return true;
+        return App.Dialogs.Confirm("Firmware update in progress",
+            "The device is being programmed. Closing now cancels the update and leaves it without working firmware until you flash it again.",
+            "Close anyway", destructive: true);
+    }
+
     public void ShutDown()
     {
+        Firmware.CancelForShutdown();
         App.Hold.Dispose();
         App.Settings.Save();
         _tick?.Stop();

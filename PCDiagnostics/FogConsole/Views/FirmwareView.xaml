@@ -1,0 +1,266 @@
+<UserControl x:Class="FogConsole.Views.FirmwareView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:cv="clr-namespace:FogConsole.Converters"
+             xmlns:vm="clr-namespace:FogConsole.ViewModels">
+    <UserControl.Resources>
+        <!-- one firmware in the list -->
+        <DataTemplate x:Key="ChoiceTemplate" DataType="{x:Type vm:FirmwareChoice}">
+            <Border Margin="0,0,0,8" Padding="14,10" CornerRadius="8" BorderThickness="1.5">
+                <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource Fog.Tile}">
+                        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Border}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+                                <Setter Property="Background" Value="{DynamicResource Fog.AccentSoft}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE9F5;" Style="{StaticResource Fog.Icon}" FontSize="22" VerticalAlignment="Center" Margin="0,0,14,0"
+                               Foreground="{DynamicResource Fog.Accent}"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" Style="{StaticResource Fog.Subtitle}"/>
+                        <TextBlock Text="{Binding Detail}" Style="{StaticResource Fog.Faint}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Path}" Style="{StaticResource Fog.Faint}" FontFamily="{StaticResource Fog.MonoFont}" TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Path}"/>
+                        <TextBlock Text="{Binding ProblemText}" Foreground="{DynamicResource Fog.Bad}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Visibility="{Binding HasProblems, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Style="{StaticResource Fog.Chip.Accent}" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding KindText}" Style="{StaticResource Fog.ChipText.Accent}"/>
+                        </Border>
+                        <Border Style="{StaticResource Fog.Chip}" ToolTip="Complete: boot loader, partition table and application are available, so a full reinstall is possible. Application only: just the update.">
+                            <TextBlock Text="{Binding ContentsText}" Style="{StaticResource Fog.ChipText}"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="ModeRadio" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="VerticalContentAlignment" Value="Top"/>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="24,18,24,28" MaxWidth="1200" HorizontalAlignment="Stretch">
+            <TextBlock Text="Firmware" Style="{StaticResource Fog.PageTitle}"/>
+            <TextBlock Style="{StaticResource Fog.PageSubtitle}"
+                       Text="Update the remote or a timer over its USB cable. The device is put into its ROM bootloader automatically, written, checked and restarted. This page never uses the radio: every device is updated on its own cable."/>
+
+            <!-- 1. device -->
+            <Border Style="{StaticResource Fog.Card}">
+                <StackPanel>
+                    <TextBlock Text="1  ·  Device" Style="{StaticResource Fog.Subtitle}"/>
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Top"
+                                    Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.InverseBoolToVisibility}}">
+                            <ComboBox Width="290" ItemsSource="{Binding Ports}" SelectedItem="{Binding SelectedPort}" DisplayMemberPath="Display"
+                                      IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" AutomationProperties.Name="Serial port of the device to update"/>
+                            <Button Style="{StaticResource Fog.IconButton}" Content="&#xE72C;" Margin="4,0,0,0" Command="{Binding RefreshAllCommand}"
+                                    ToolTip="Refresh the port list and the firmware list" AutomationProperties.Name="Refresh"/>
+                        </StackPanel>
+                        <Border Style="{StaticResource Fog.Chip.Sim}" Padding="12,6" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7F8;" Style="{StaticResource Fog.ChipIcon}" Foreground="{DynamicResource Fog.Sim}"/>
+                                <TextBlock Text="SIMULATED chip - nothing real is written" Style="{StaticResource Fog.ChipText.Sim}"/>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Grid.Column="2" Margin="22,0,0,0" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding DeviceTitle}" Style="{StaticResource Fog.Subtitle}"/>
+                            <TextBlock Text="{Binding DeviceDetail}" Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 2. firmware -->
+            <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Text="2  ·  Firmware" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource Fog.Button.Small}" Content="Choose file..." Padding="12,5" Margin="0,0,6,0" Command="{Binding BrowseFileCommand}"
+                                    IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" ToolTip="Pick a firmware .bin file (an application image, or a merged image)"/>
+                            <Button Style="{StaticResource Fog.Button.Small}" Content="Choose folder..." Padding="12,5" Command="{Binding BrowseFolderCommand}"
+                                    IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" ToolTip="Pick a PlatformIO build folder (firmware.bin, bootloader.bin, partitions.bin)"/>
+                        </StackPanel>
+                    </Grid>
+                    <Border Style="{StaticResource Fog.Tile}" Margin="0,12,0,0" Padding="14,12"
+                            Visibility="{Binding HasChoices, Converter={x:Static cv:Conv.InverseBoolToVisibility}}">
+                        <TextBlock Style="{StaticResource Fog.DimBody}" TextWrapping="Wrap"
+                                   Text="No firmware found. Build one with PlatformIO (pio run in FogMachineTimer or FogMachineRemoteControl), put the build folder next to this program in a folder named firmware, or choose a file or folder above."/>
+                    </Border>
+                    <ListBox Margin="0,12,0,0" ItemsSource="{Binding Choices}" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource ChoiceTemplate}"
+                             ItemContainerStyle="{StaticResource Fog.PlainListItem}" BorderThickness="0" Background="Transparent" Focusable="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}" AutomationProperties.Name="Available firmware"
+                             Visibility="{Binding HasChoices, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                    <TextBlock Text="{Binding CatalogNote}" TextWrapping="Wrap" TextTrimming="None" Foreground="{DynamicResource Fog.Warn}" Margin="0,4,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.Caption}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CatalogNote}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="14"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 3. what to write -->
+            <Border Style="{StaticResource Fog.Card}" Grid.Column="0">
+                <StackPanel>
+                    <TextBlock Text="3  ·  What to write" Style="{StaticResource Fog.Subtitle}"/>
+                    <StackPanel Margin="0,14,0,0" IsEnabled="{Binding IsBusy, Converter={x:Static cv:Conv.Not}}">
+                        <RadioButton Style="{StaticResource ModeRadio}" GroupName="FlashMode" IsChecked="{Binding IsUpdate, Mode=TwoWay}" AutomationProperties.Name="Update">
+                            <StackPanel>
+                                <TextBlock Text="Update (recommended)" Style="{StaticResource Fog.Label}"/>
+                                <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None"
+                                           Text="Writes only the new firmware. Settings, the pairing list, names and the boot loader stay as they are. If the device has a different partition layout, the boot loader and partition table are written too."/>
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton Style="{StaticResource ModeRadio}" GroupName="FlashMode" IsChecked="{Binding IsReinstall, Mode=TwoWay}" IsEnabled="{Binding CanReinstall}"
+                                     AutomationProperties.Name="Reinstall">
+                            <StackPanel>
+                                <TextBlock Text="Reinstall" Style="{StaticResource Fog.Label}"/>
+                                <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None"
+                                           Text="Writes boot loader, partition table and firmware. Settings and pairing are kept. Use it for a device that was flashed with something else before. Needs a complete firmware (a build folder)."/>
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton Style="{StaticResource ModeRadio}" GroupName="FlashMode" IsChecked="{Binding IsCleanInstall, Mode=TwoWay}" IsEnabled="{Binding CanReinstall}"
+                                     Margin="0,0,0,4" AutomationProperties.Name="Clean install">
+                            <StackPanel>
+                                <TextBlock Text="Clean install" Style="{StaticResource Fog.Label}"/>
+                                <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None"
+                                           Text="Like Reinstall, and the settings are erased: the device starts like new (a remote has to pair its timers again; a timer forgets its name and times)."/>
+                            </StackPanel>
+                        </RadioButton>
+                        <StackPanel Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.InverseBoolToVisibility}}">
+                            <Rectangle Style="{StaticResource Fog.Separator}"/>
+                            <CheckBox IsChecked="{Binding ManualBoot}" Content="The device is already in download mode (I held BOOT while resetting it)" Margin="0,4,0,0"
+                                      ToolTip="Normally the tool resets the device into its bootloader by itself. Tick this only when that does not work: hold BOOT, tap RESET, release BOOT, then press Flash."/>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 4. go -->
+            <Border Style="{StaticResource Fog.Card}" Grid.Column="2">
+                <StackPanel>
+                    <TextBlock Text="4  ·  Flash" Style="{StaticResource Fog.Subtitle}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button Style="{StaticResource Fog.Button.Accent}" Padding="26,11" FontSize="14" Command="{Binding FlashCommand}" AutomationProperties.Name="Flash firmware">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE896;" Style="{StaticResource Fog.Icon}" FontSize="16" Margin="0,0,10,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <TextBlock Text="{Binding FlashButtonText}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource Fog.Button}" Content="Check device" Padding="20,11" Margin="10,0,0,0" Command="{Binding CheckCommand}"
+                                Visibility="{Binding IsBusy, Converter={x:Static cv:Conv.InverseBoolToVisibility}}" AutomationProperties.Name="Check the device without writing"
+                                ToolTip="Identifies the chip and its MAC address and compares its flash with the chosen firmware. Writes nothing; the device is restarted afterwards."/>
+                        <Button Style="{StaticResource Fog.Button}" Content="Cancel" Padding="20,11" Margin="10,0,0,0" Command="{Binding CancelCommand}"
+                                Visibility="{Binding IsBusy, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Cancel the update"
+                                ToolTip="Stops the transfer. The device may be left without working firmware until it is flashed again."/>
+                    </StackPanel>
+
+                    <!-- progress -->
+                    <StackPanel Margin="0,16,0,0" Visibility="{Binding IsBusy, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                        <Grid>
+                            <TextBlock Text="{Binding StageText}" Style="{StaticResource Fog.Body}"/>
+                            <TextBlock Text="{Binding Progress, StringFormat='{}{0:P0}'}" Style="{StaticResource Fog.MonoDim}" HorizontalAlignment="Right"
+                                       Visibility="{Binding ProgressIndeterminate, Converter={x:Static cv:Conv.InverseBoolToVisibility}}"/>
+                        </Grid>
+                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}" IsIndeterminate="{Binding ProgressIndeterminate}" Height="8" Margin="0,8,0,6"
+                                     AutomationProperties.Name="Firmware update progress"/>
+                        <TextBlock Text="{Binding DetailText}" Style="{StaticResource Fog.Caption}"/>
+                    </StackPanel>
+
+                    <!-- result -->
+                    <Border Margin="0,16,0,0" Padding="14,10" CornerRadius="8" BorderThickness="1"
+                            Background="{cv:ToneBrush Path=ResultLevel, Part=Bg}" BorderBrush="{cv:ToneBrush Path=ResultLevel, Part=Border}"
+                            Visibility="{Binding HasResult, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Result of the update">
+                        <TextBlock Text="{Binding ResultText}" TextWrapping="Wrap" Foreground="{cv:ToneBrush Path=ResultLevel}" FontWeight="SemiBold" LineHeight="20"/>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None" Margin="0,14,0,0"
+                               Text="Do not unplug the cable while the update runs. If something goes wrong the device can always be recovered: hold its BOOT button while plugging it in, then flash again."/>
+                </StackPanel>
+            </Border>
+            </Grid>
+
+            <!-- the fleet -->
+            <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0" Visibility="{Binding HasTimers, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="Timers of this system" Style="{StaticResource Fog.Subtitle}"/>
+                    <TextBlock Style="{StaticResource Fog.Caption}" TextWrapping="Wrap" TextTrimming="None" Margin="0,2,0,10"
+                               Text="Firmware versions as reported by the timers through the remote. A timer is updated over its own USB cable: plug it in, pick its port above and flash the timer firmware."/>
+                    <ItemsControl ItemsSource="{Binding Timers}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:TimerFirmwareRow}">
+                                <Border Style="{StaticResource Fog.Tile}" Margin="0,0,0,6" Padding="12,7">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="170"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Name}" Style="{StaticResource Fog.Label}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Mac}" Style="{StaticResource Fog.MonoDim}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Version}" Style="{StaticResource Fog.Mono}" VerticalAlignment="Center"/>
+                                        <Border Grid.Column="3" Style="{StaticResource Fog.Chip}" HorizontalAlignment="Left"
+                                                Background="{cv:ToneBrush Path=Level, Part=Bg}" BorderBrush="{cv:ToneBrush Path=Level, Part=Border}">
+                                            <TextBlock Text="{Binding Verdict}" Style="{StaticResource Fog.ChipText}" Foreground="{cv:ToneBrush Path=Level}"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- log -->
+            <Border Style="{StaticResource Fog.Card}" Margin="0,14,0,0" Visibility="{Binding HasLog, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Text="Log" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                        <Button Style="{StaticResource Fog.Button.Small}" Content="Copy" HorizontalAlignment="Right" Padding="12,4" Command="{Binding CopyLogCommand}"
+                                ToolTip="Copy the log to the clipboard" AutomationProperties.Name="Copy the log"/>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding LogLines}" Margin="0,10,0,0" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Style="{StaticResource Fog.Mono}" FontSize="12" TextWrapping="Wrap"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

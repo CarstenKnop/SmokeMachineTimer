@@ -9,6 +9,9 @@ pio run -d FogMachineRemoteControl -t upload   # flash
 powershell -File tools/oled-preview/run.ps1    # render all screens to docs/images/oled (needs one build first)
 ```
 
+Fog Console can flash it too (page *Firmware*, [`docs/FIRMWARE_UPDATE.md`](../docs/FIRMWARE_UPDATE.md)). It recognises the image by the identity string
+`FOGFW|remote|<version>|` that `src/main.cpp` compiles in (`FOG_FW_IDENT`, [`lib/FogLink/FogIdent.h`](../lib/FogLink/FogIdent.h)).
+
 | Folder | Role |
 |--------|------|
 | `src/main.cpp` | boot, main loop, input handling, deep sleep |

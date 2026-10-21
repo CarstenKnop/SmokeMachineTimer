@@ -16,3 +16,6 @@ tools/*/build/
 
 # generated, 5 MB (images embedded): rebuild with  python tools/make-manual-html.py
 docs/FOG_CONSOLE_MANUAL.html
+
+# firmware images staged for the Firmware page by tools/package-firmware.ps1 (build output)
+PCDiagnostics/FogConsole/firmware/

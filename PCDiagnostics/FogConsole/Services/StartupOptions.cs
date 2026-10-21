@@ -30,7 +30,7 @@ public sealed record StartupOptions
     public bool IsScreenshot => !string.IsNullOrEmpty(Shot);
 
     public const string Usage =
-        "FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N] [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Settings]\n" +
+        "FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N] [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Firmware|Settings]\n" +
         "               [--select N] [--shot out.png [--shot-scale 1]] [--delay secs] [--exit] [--theme light|dark|system] [--size WxH]\n" +
         "               [--no-chaos] [--no-demo] [--no-settings] [--action name] [--scroll px]";
 
@@ -88,7 +88,7 @@ public sealed record StartupOptions
                     if (Next(ref i, a) is { } pg)
                     {
                         if (Enum.TryParse<NavPage>(pg, ignoreCase: true, out var page)) o = o with { Page = page };
-                        else problems.Add($"--page: '{pg}' is not a page (Dashboard, Device, Pairing, Channels, Diagnostics, Console, Settings)");
+                        else problems.Add($"--page: '{pg}' is not a page (Dashboard, Device, Pairing, Channels, Diagnostics, Console, Firmware, Settings)");
                     }
                     break;
                 case "--shot":

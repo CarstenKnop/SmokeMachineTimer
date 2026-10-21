@@ -51,6 +51,9 @@ public sealed class AppSettings
 
     /// <summary>Remote | Timer</summary>
     public string SimulatorKind { get; set; } = "Remote";
+
+    /// <summary>Firmware files or folders the user picked on the Firmware page (offered again next time).</summary>
+    public List<string> FirmwarePaths { get; set; } = new();
 }
 
 public sealed class SettingsService
@@ -89,6 +92,7 @@ public sealed class SettingsService
                 {
                     s.Devices ??= new();
                     s.CustomPresets ??= new();
+                    s.FirmwarePaths ??= new();
                     s.LogBufferSize = Math.Clamp(s.LogBufferSize, 500, 100_000);
                     s.PacketBufferSize = Math.Clamp(s.PacketBufferSize, 500, 100_000);
                     return s;

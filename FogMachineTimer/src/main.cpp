@@ -10,12 +10,15 @@
 #include <esp_task_wdt.h>
 
 #include "EspTimerPlatform.h"
+#include "FogIdent.h"
 #include "FogJsonLine.h"
 #include "FogLog.h"
 #include "Pins.h"
 #include "UsbConsole.h"
 
 using namespace Fog;
+
+FOG_FW_IDENT("timer");                              // lets Fog Console recognise this image before flashing it
 
 static EspTimerPlatform platform;
 static TimerNode node(platform);

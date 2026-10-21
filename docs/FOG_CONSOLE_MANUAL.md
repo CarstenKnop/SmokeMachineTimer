@@ -16,12 +16,13 @@
 8. [Channels and Link Lab](#8-channels-and-link-lab)
 9. [Diagnostics](#9-diagnostics)
 10. [Console](#10-console)
-11. [Settings](#11-settings)
-12. [Offline demo (simulator)](#12-offline-demo-simulator)
-13. [A timer connected directly](#13-a-timer-connected-directly)
-14. [Safety features](#14-safety-features)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Command line, files and shortcuts](#16-command-line-files-and-shortcuts)
+11. [Firmware](#11-firmware)
+12. [Settings](#12-settings)
+13. [Offline demo (simulator)](#13-offline-demo-simulator)
+14. [A timer connected directly](#14-a-timer-connected-directly)
+15. [Safety features](#15-safety-features)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Command line, files and shortcuts](#17-command-line-files-and-shortcuts)
 
 > **Terminology:** “fog machine” (fogger) and “smoke machine” are both common. “Fog” is the US trade name, “smoke machine” the UK/Danish everyday term. Neither makes real smoke. I use “smoke machine” for the machine and “fog” for the burst.
 
@@ -39,6 +40,7 @@ remote's radio it can do everything the remote's buttons do — for **all ten ti
 * **Radio tools:** channel survey, moving the whole system to a quiet channel, finding timers that were away, link tests.
 * **Debugging:** the performance counters of the remote and of every timer, health hints, history graphs, a packet inspector, the
   device log and a raw command line.
+* **Firmware update:** put new firmware on the remote or on a timer over USB, with checks and verification — no PlatformIO needed (see [§11](#11-firmware)).
 * **Offline demo:** a built-in simulator with up to ten virtual timers, so you can learn the tool without any hardware.
 
 The remote stays awake while the PC is connected. When the PC goes away the remote's normal Auto Off behaviour applies again.
@@ -60,7 +62,7 @@ The program ends up in `PCDiagnostics\FogConsole\bin\Release\net10.0-windows\Fog
 **The window always starts maximized.** Un-maximize it and it returns to the size and position you last used. The layout adapts
 from a 1000 px wide window up to 4K: dashboard cards reflow into as many columns as fit.
 
-The theme follows Windows (light or dark) and can be changed in [Settings](#11-settings). Every page looks like this in both themes:
+The theme follows Windows (light or dark) and can be changed in [Settings](#12-settings). Every page looks like this in both themes:
 
 ![Dashboard, light theme](../PCDiagnostics/docs/dashboard-light.png)
 
@@ -74,7 +76,7 @@ The theme follows Windows (light or dark) and can be changed in [Settings](#11-s
   list at the top left (press **F5** or the refresh button if the list is empty). Press **Connect**.
   If the remote is asleep or unplugged the tool simply waits and connects by itself when the port appears; it also reconnects
   after the remote restarts (reboot, factory reset, channel change).
-* **Try offline demo** — starts the simulator (see [§12](#12-offline-demo-simulator)). Nothing is connected to real machines.
+* **Try offline demo** — starts the simulator (see [§13](#13-offline-demo-simulator)). Nothing is connected to real machines.
 
 ---
 
@@ -82,7 +84,7 @@ The theme follows Windows (light or dark) and can be changed in [Settings](#11-s
 
 * **Top bar** — port list, **Connect/Disconnect**, **Simulator**, and on the right the connection chip (state and latency) and
   the remote chip (battery %, USB/charging, channel).
-* **Navigation rail** (left) — Dashboard, Device, Pairing, Channels, Diagnostics, Console, Settings.
+* **Navigation rail** (left) — Dashboard, Device, Pairing, Channels, Diagnostics, Console, Firmware, Settings.
 * **Banners** — a **red banner** whenever any timer is *forced on*; a **violet SIMULATED banner** (and a tinted window) in demo mode.
 * **Status bar** (bottom) — the latest command result or error, lines per second on the cable, count of unparsable lines,
   protocol version and the remote's firmware version.
@@ -111,7 +113,7 @@ One **card per timer**, ten at most. Everything on a card updates live (the ring
 
 **Buttons on a card**
 
-* **Hold to fog** — *press and hold*: the output is forced on, as long as you keep holding (see [Safety](#14-safety-features)).
+* **Hold to fog** — *press and hold*: the output is forced on, as long as you keep holding (see [Safety](#15-safety-features)).
 * **Toggle** — flip the phase now (OFF → ON or ON → OFF); the phase timer restarts.
 * **Reset** — output off and the cycle starts again from the beginning of its OFF phase.
 * **Pause / Resume** — freeze the cycle with the output off / continue where it stopped.
@@ -244,7 +246,59 @@ Three tabs show everything the device says.
 
 ---
 
-## 11. Settings
+## 11. Firmware
+
+![Firmware page](../PCDiagnostics/docs/firmware-dark.png)
+
+Updates the firmware of the **remote** or of a **timer** over its USB cable, without PlatformIO. Every device is updated on its **own cable**;
+nothing is sent over the radio. The whole story behind the button — flash map, safety, how it works, what has been verified — is in
+[`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md); this is the page itself.
+
+**1 · Device.** The serial port of the device to update. If the tool is connected to a port, that one is pre-selected and the card says what
+it is (*Remote “Fogger” · firmware 2.0.0*). The tool closes its connection for the update and restores it afterwards. A remote in deep sleep
+has no port: press UP or DOWN. A timer needs power from the USB cable while you update it.
+
+**2 · Firmware.** Everything the tool finds: firmware **installed with the app** (a `firmware` folder next to `FogConsole.exe`), the
+PlatformIO build output of **this repository**, and what you **chose** with *Choose file…* or *Choose folder…*. Each entry shows what it is
+(**Timer** or **Remote**, read from the file itself), its version, whether it is **complete** (boot loader, partition table and
+application) or **application only**, and any problem (a damaged file, firmware for another chip). The one that fits the connected
+device is pre-selected.
+
+**3 · What to write.**
+
+| Mode | What happens |
+|------|--------------|
+| **Update** *(recommended)* | Writes only the new firmware. Settings, pairing and names stay. If the device has another partition layout, the boot loader and partition table are written too |
+| **Reinstall** | Boot loader, partition table and firmware. Settings and pairing stay |
+| **Clean install** | Like *Reinstall*, and the settings are erased: the device starts like new |
+
+*The device is already in download mode* is for the rare case that the automatic reset does not work: hold BOOT, tap RESET, release BOOT, tick the box.
+
+**4 · Flash.** The button starts the update. A bar shows the stage, the amount written, the speed and the time left; **Cancel** stops it.
+**Check device** writes nothing: it identifies the chip and its MAC address, compares the flash with the chosen firmware and restarts the device —
+the safe first step with a new board or cable. When the chip's MAC address belongs to a timer on the dashboard (or to the remote), the result says so —
+*“This is Fog3.”* — so you know you updated the right machine.
+Afterwards the page says what was done (*Done: 1 part written, 3 unchanged and verified.*), and — when the tool was connected — which firmware the
+device reports after the restart.
+
+![Update running](../PCDiagnostics/docs/firmware-flashing-dark.png)
+
+![Update done](../PCDiagnostics/docs/firmware-done-dark.png)
+
+**Timers of this system** lists the firmware version every paired timer reported through the remote, compared with the newest timer firmware
+the tool knows: *up to date*, *older than 2.1.0* … Use it to see which timers still need the update; each one is then updated on its own cable.
+The **Log** records every step; *Copy* puts it on the clipboard for a bug report.
+
+**It asks before it does something questionable:** timer firmware for a remote (or the reverse), a file that does not say which kind it is, and a
+clean install. A damaged or wrong-chip image cannot be flashed at all; the image is checked (header, chip, checksum, SHA-256) before the
+cable is touched. Closing the window during an update asks for confirmation.
+
+In the **offline demo** the page works on a *simulated* chip and two demo images: you can run the complete procedure, including a cancel, with
+nothing connected.
+
+---
+
+## 12. Settings
 
 ![Settings](../PCDiagnostics/docs/settings-dark.png)
 
@@ -263,7 +317,7 @@ Three tabs show everything the device says.
 
 ---
 
-## 12. Offline demo (simulator)
+## 13. Offline demo (simulator)
 
 The demo is a complete, **virtual remote with up to ten virtual timers**; it speaks the very same protocol as the real thing. Start it from the
 welcome screen (**Try offline demo**), from the top bar (**Simulator**) or with `--sim`. A violet **SIMULATED** chip, a banner and a tinted
@@ -284,15 +338,15 @@ for a while) are part of the default scenario.
 
 ---
 
-## 13. A timer connected directly
+## 14. A timer connected directly
 
 Plug a **timer** (not the remote) into the PC and connect: the tool recognises it and treats it as a fleet of one. Fleet functions (pairing, channel
 survey…) are hidden; you can configure the timer (name, ON/OFF times, start phase), control it, watch its log and see its own counters under
-Diagnostics. This is the easiest way to prepare a timer on the bench before it goes on a machine.
+Diagnostics. This is the easiest way to prepare a timer on the bench before it goes on a machine — and the place to put the newest firmware on it ([§11](#11-firmware)).
 
 ---
 
-## 14. Safety features
+## 15. Safety features
 
 * **Hold to fog is momentary.** The output is forced on only while you hold the button (or the space bar while the button has the focus). The tool
   refreshes the command every 0.3 s; letting go, switching to another window, losing focus or losing the connection releases it. And even if the PC
@@ -302,11 +356,13 @@ Diagnostics. This is the easiest way to prepare a timer on the bench before it g
 * **Every command shows its real result:** confirmed (with attempts and time), rejected, or timed out with a plain explanation. A rejected command
   right after a power cut is normal: the rebooted timer refuses commands that were meant for its previous start (it must never fire by surprise) —
   just press again.
+* **Firmware updates are checked and verified:** the image must be intact and built for the ESP32-C3, a timer/remote mix-up and a clean install ask first, every
+  written part is compared with the file by the chip itself, and a failed or cancelled run still sends the device back to its application.
 * The radio link is not encrypted; see the [user manual](MANUAL.md#2-safety).
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 | Symptom | Cause / what to do |
 |---------|--------------------|
@@ -315,20 +371,22 @@ Diagnostics. This is the easiest way to prepare a timer on the bench before it g
 | Dashboard is empty after connecting | No timers paired yet → [Pairing](#7-pairing) |
 | A timer is **OFFLINE** | Its machine is heating, or it is out of range or on another channel → wait, then **Find lost timers**; check [Diagnostics](#9-diagnostics) |
 | “did not answer — it may be powered off while heating” | The command could not be delivered within 2.5 s; repeat when the timer is back |
-| “rejected” right after a power cut | See [Safety features](#14-safety-features): just press again |
+| “rejected” right after a power cut | See [Safety features](#15-safety-features): just press again |
 | The status bar shows `bad JSON: N` | Some line on the cable could not be understood (for example garbage after a reset); harmless if the number does not keep growing |
 | Channel move “cancelled” | No timer answered. Power the machines on or tick **Force** |
 | The window opens on the wrong monitor | Un-maximize, move it, maximize again — the restored position is remembered |
+| Firmware page: “in use by another program” | Close the serial monitor / PlatformIO / second Fog Console that has the port |
+| Firmware page: “did not enter its bootloader” | Put the device into download mode by hand (hold BOOT, tap RESET, release BOOT), tick the box on the page, press Flash. More in [`FIRMWARE_UPDATE.md`](FIRMWARE_UPDATE.md#7-troubleshooting) |
 
 If something looks wrong, **Console → Raw** shows the exact lines exchanged, and **Diagnostics → Copy as JSON** captures the counters.
 
 ---
 
-## 16. Command line, files and shortcuts
+## 17. Command line, files and shortcuts
 
 ```
 FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
-               [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Settings] [--select N]
+               [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Firmware|Settings] [--select N]
                [--theme light|dark|system] [--size WxH] [--no-chaos] [--no-demo] [--no-settings]
                [--shot out.png [--shot-scale 1]] [--delay secs] [--exit] [--action name] [--scroll px]
 ```
@@ -341,9 +399,9 @@ FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
 | `--no-chaos`, `--no-demo` | No random power cuts / no scripted start scenario — reproducible pictures |
 | `--shot file.png`, `--delay s`, `--exit` | Save a screenshot after *delay* seconds and quit (this is how the pictures in this manual were made; see `PCDiagnostics\docs\make-screenshots.ps1`) |
 
-**Keyboard:** `Ctrl+1` … `Ctrl+7` switch pages (Dashboard … Settings), `F5` rescans the COM ports.
+**Keyboard:** `Ctrl+1` … `Ctrl+8` switch pages (Dashboard … Settings), `F5` rescans the COM ports.
 
-**Files:** settings are stored in `%AppData%\FogConsole\settings.json` (last port, window size, nicknames and colours, theme); unexpected errors are
+**Files:** settings are stored in `%AppData%\FogConsole\settings.json` (last port, window size, nicknames and colours, theme, firmware files you picked); unexpected errors are
 written to `%AppData%\FogConsole\crash.log`.
 
 More details for developers: [`PCDiagnostics/README.md`](../PCDiagnostics/README.md) and [`PROTOCOL_NOTES.md`](../PCDiagnostics/PROTOCOL_NOTES.md).

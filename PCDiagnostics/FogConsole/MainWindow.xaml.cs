@@ -62,6 +62,11 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (!_vm.CanCloseNow())
+        {
+            e.Cancel = true;
+            return;
+        }
         var s = _settings.Current;
         var b = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         s.WindowLeft = b.Left;

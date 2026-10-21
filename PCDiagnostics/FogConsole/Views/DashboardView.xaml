@@ -1,0 +1,395 @@
+<UserControl x:Class="FogConsole.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:FogConsole.Controls"
+             xmlns:cv="clr-namespace:FogConsole.Converters"
+             xmlns:vm="clr-namespace:FogConsole.ViewModels"
+             xmlns:svc="clr-namespace:FogConsole.Services">
+    <UserControl.Resources>
+        <!-- ring colour follows the state of the timer -->
+        <Style x:Key="PhaseRing" TargetType="c:ArcProgress">
+            <Setter Property="Thickness" Value="8.5"/>
+            <Setter Property="TrackBrush" Value="{DynamicResource Fog.Track}"/>
+            <Setter Property="Brush" Value="{DynamicResource Fog.TextFaint}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding PillState}" Value="On"><Setter Property="Brush" Value="{DynamicResource Fog.Accent}"/></DataTrigger>
+                <DataTrigger Binding="{Binding PillState}" Value="ForceOn"><Setter Property="Brush" Value="{DynamicResource Fog.Danger}"/></DataTrigger>
+                <DataTrigger Binding="{Binding PillState}" Value="Paused"><Setter Property="Brush" Value="{DynamicResource Fog.Warn}"/></DataTrigger>
+                <DataTrigger Binding="{Binding PillState}" Value="Offline"><Setter Property="Brush" Value="{DynamicResource Fog.BorderStrong}"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardActionButton" TargetType="Button" BasedOn="{StaticResource Fog.Button.Small}">
+            <Setter Property="Padding" Value="4,5"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="3,0"/>
+        </Style>
+
+        <Style x:Key="CardBorder" TargetType="Border" BasedOn="{StaticResource Fog.Card}">
+            <Setter Property="Focusable" Value="True"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Padding" Value="16,14,16,14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                    <Setter Property="Padding" Value="15,13,15,13"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsForceOn}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Fog.Danger}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                    <Setter Property="Padding" Value="15,13,15,13"/>
+                    <Setter Property="Background" Value="{DynamicResource Fog.BadSoft}"/>
+                </DataTrigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                    <Setter Property="Padding" Value="15,13,15,13"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- one timer -->
+        <DataTemplate DataType="{x:Type vm:DeviceViewModel}">
+            <Border Style="{StaticResource CardBorder}" AutomationProperties.Name="{Binding DisplayName, StringFormat='Timer {0}'}">
+                <Border.InputBindings>
+                    <MouseBinding MouseAction="LeftClick" Command="{Binding SelectCommand}"/>
+                    <MouseBinding MouseAction="LeftDoubleClick" Command="{Binding OpenDetailsCommand}"/>
+                    <KeyBinding Key="Enter" Command="{Binding OpenDetailsCommand}"/>
+                    <KeyBinding Key="Space" Command="{Binding SelectCommand}"/>
+                </Border.InputBindings>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- header: colour tag, name (editable), mode badge, details -->
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Command="{Binding CycleColorCommand}" Width="22" Height="22" Padding="0" Margin="0,0,9,0" ToolTip="Colour tag (click to change)"
+                                Style="{StaticResource Fog.Button.Subtle}" AutomationProperties.Name="Colour tag" VerticalAlignment="Center">
+                            <Ellipse Width="14" Height="14" Fill="{Binding TagBrush}"/>
+                        </Button>
+                        <Grid Grid.Column="1" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal"
+                                        Visibility="{Binding IsEditingName, Converter={x:Static cv:Conv.InverseBoolToVisibility}}">
+                                <TextBlock Text="{Binding DisplayName}" Style="{StaticResource Fog.Subtitle}" FontSize="16.5" VerticalAlignment="Center"
+                                           ToolTip="Double-click to rename (the nickname is stored on this PC)">
+                                    <TextBlock.InputBindings>
+                                        <MouseBinding MouseAction="LeftDoubleClick" Command="{Binding StartEditNameCommand}"/>
+                                    </TextBlock.InputBindings>
+                                </TextBlock>
+                                <Button Style="{StaticResource Fog.IconButton}" Content="&#xE70F;" Width="24" Height="24" FontSize="11" Margin="3,0,0,0"
+                                        Command="{Binding StartEditNameCommand}" ToolTip="Rename" AutomationProperties.Name="Rename"/>
+                            </StackPanel>
+                            <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}" MaxLength="24" Padding="6,3"
+                                     Visibility="{Binding IsEditingName, Converter={x:Static cv:Conv.BoolToVisibility}}"
+                                     c:Behaviors.FocusWhenVisible="True" AutomationProperties.Name="Nickname">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding CommitNameCommand}"/>
+                                    <KeyBinding Key="Escape" Command="{Binding CancelEditNameCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                        </Grid>
+                        <Border Grid.Column="2" Style="{StaticResource Fog.Chip}" Margin="6,0" ToolTip="Operating mode of this timer"
+                                Background="{cv:ToneBrush Path=PillState, Part=Bg}" BorderBrush="{cv:ToneBrush Path=PillState, Part=Border}">
+                            <TextBlock Text="{Binding ModeText}" Style="{StaticResource Fog.ChipText}" Foreground="{cv:ToneBrush Path=PillState}"/>
+                        </Border>
+                        <Button Grid.Column="3" Style="{StaticResource Fog.IconButton}" Content="&#xE76C;" Command="{Binding OpenDetailsCommand}"
+                                ToolTip="Open details and settings (double-click the card)" AutomationProperties.Name="Open details"/>
+                    </Grid>
+
+                    <TextBlock Grid.Row="1" Margin="31,0,0,0" Style="{StaticResource Fog.Faint}" FontFamily="{StaticResource Fog.MonoFont}">
+                        <Run Text="{Binding Mac, Mode=OneWay}"/>
+                        <Run Text="  &#183;  "/>
+                        <Run Text="{Binding BootText, Mode=OneWay}"/>
+                    </TextBlock>
+
+                    <!-- live phase: ring + big numerals -->
+                    <Grid Grid.Row="2" Margin="0,10,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="108" Height="108">
+                            <c:ArcProgress Style="{StaticResource PhaseRing}" Value="{Binding Progress}"/>
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="{Binding RemainingText}" Style="{StaticResource Fog.Digits}" FontSize="27" HorizontalAlignment="Center"
+                                               AutomationProperties.Name="Seconds remaining" Foreground="{DynamicResource Fog.Text}"/>
+                                </StackPanel>
+                                <TextBlock Text="seconds" Style="{StaticResource Fog.Faint}" HorizontalAlignment="Center" Margin="0,-2,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                            <Border Style="{StaticResource Fog.Chip}" HorizontalAlignment="Left" Padding="14,5" CornerRadius="15"
+                                    Background="{cv:ToneBrush Path=PillState, Part=Bg}" BorderBrush="{cv:ToneBrush Path=PillState, Part=Border}"
+                                    AutomationProperties.Name="{Binding PillText, StringFormat='State {0}'}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#x25CF;" FontSize="11" Margin="0,0,7,0" VerticalAlignment="Center" Foreground="{cv:ToneBrush Path=PillState}"/>
+                                    <TextBlock Text="{Binding PillText}" Style="{StaticResource Fog.ChipText}" FontSize="16" Foreground="{cv:ToneBrush Path=PillState}"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding UntilText}" Margin="3,5,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.Caption}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Online}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding LastSeenText}" Margin="3,5,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Fog.Warn}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.Caption}">
+                                        <Setter Property="Foreground" Value="{DynamicResource Fog.Warn}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Online}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding TimesText}" Style="{StaticResource Fog.Faint}" Margin="3,8,0,0" ToolTip="Configured durations"/>
+                            <WrapPanel Margin="0,6,0,0">
+                                <WrapPanel.Style>
+                                    <Style TargetType="WrapPanel">
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsRebooted}" Value="False"/>
+                                                    <Condition Binding="{Binding HasPending}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </WrapPanel.Style>
+                                <Border Style="{StaticResource Fog.Chip.Info}" Margin="0,0,6,0" ToolTip="The timer lost power and restarted within the last 30 s."
+                                        Visibility="{Binding IsRebooted, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE777;" Style="{StaticResource Fog.ChipIcon}" Foreground="{DynamicResource Fog.Info}"/>
+                                        <TextBlock Text="REBOOTED" Style="{StaticResource Fog.ChipText.Info}"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource Fog.Chip.Accent}" Margin="0,0,6,0" ToolTip="Commands waiting for this timer"
+                                        Visibility="{Binding HasPending, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                                    <TextBlock Text="{Binding PendingText}" Style="{StaticResource Fog.ChipText.Accent}"/>
+                                </Border>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- link quality -->
+                    <Border Grid.Row="3" Style="{StaticResource Fog.Tile}" Margin="0,0,0,8" AutomationProperties.Name="Link quality">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <c:SignalBars Width="26" Height="17" Bars="{Binding SignalBars}" VerticalAlignment="Center"
+                                          OnBrush="{cv:ToneBrush Path=Quality, Part=Fg}" OffBrush="{DynamicResource Fog.Track}"/>
+                            <StackPanel Grid.Column="1" Margin="9,0,10,0" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Fog.Mono}" FontSize="12.5">
+                                    <Run Text="{Binding SignalText, Mode=OneWay}"/>
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource Fog.Faint}">
+                                    <Run Text="{Binding LossText, Mode=OneWay}"/><Run Text=" &#183; "/><Run Text="{Binding QualityText, Mode=OneWay}"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <c:Sparkline Grid.Column="2" Height="28" MinWidth="40" Values="{Binding RssiHistory}" Minimum="-100" Maximum="-30"
+                                         Stroke="{cv:ToneBrush Path=Quality, Part=Fg}" ToolTip="Signal strength over the last ~20 s"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- quick actions -->
+                    <Grid Grid.Row="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Button Grid.Row="0" Style="{StaticResource Fog.Button.Hold}" IsEnabled="{Binding CanControl}" Padding="10,8" Margin="3,0,3,5"
+                                c:HoldBehavior.StartCommand="{Binding HoldStartCommand}" c:HoldBehavior.EndCommand="{Binding HoldEndCommand}"
+                                AutomationProperties.Name="Hold to fog"
+                                ToolTip="Press and hold to fog (or hold the Space key while the button is focused). The output is on only while you hold it; letting go returns to automatic mode.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7E8;" Style="{StaticResource Fog.Icon}" FontSize="15" Margin="0,0,9,0"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <TextBlock Text="Hold to fog" FontSize="14"/>
+                            </StackPanel>
+                        </Button>
+                        <UniformGrid Grid.Row="1" Columns="4">
+                            <Button Style="{StaticResource CardActionButton}" Command="{Binding ToggleCommand}" ToolTip="Flip between ON and OFF and restart the phase timer" AutomationProperties.Name="Toggle">
+                                <StackPanel>
+                                    <TextBlock Text="&#xE8AB;" Style="{StaticResource Fog.Icon}" FontSize="15" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <TextBlock Text="Toggle" FontSize="11.5" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource CardActionButton}" Command="{Binding ResetCommand}" ToolTip="Output off, restart the cycle at the beginning of the OFF phase" AutomationProperties.Name="Reset">
+                                <StackPanel>
+                                    <TextBlock Text="&#xE777;" Style="{StaticResource Fog.Icon}" FontSize="15" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <TextBlock Text="Reset" FontSize="11.5" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource CardActionButton}" Command="{Binding PauseResumeCommand}" ToolTip="Pause: output off, cycle frozen. Resume: back to automatic." AutomationProperties.Name="Pause or resume">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding PauseButtonGlyph}" Style="{StaticResource Fog.Icon}" FontSize="15" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <TextBlock Text="{Binding PauseButtonText}" FontSize="11.5" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource CardActionButton}" Command="{Binding IdentifyCommand}" ToolTip="Blink the timer's LED for 5 seconds so you can find the machine" AutomationProperties.Name="Identify">
+                                <StackPanel>
+                                    <TextBlock Text="&#xE781;" Style="{StaticResource Fog.Icon}" FontSize="15" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <TextBlock Text="Identify" FontSize="11.5" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                        </UniformGrid>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- ===== normal view: bulk bar + cards ===== -->
+        <Grid Visibility="{Binding ShowGrid, Converter={x:Static cv:Conv.BoolToVisibility}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Grid Margin="24,18,24,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,24,0">
+                    <TextBlock Text="Dashboard" Style="{StaticResource Fog.PageTitle}" Margin="0"/>
+                    <TextBlock Text="{Binding DeviceCountText}" Style="{StaticResource Fog.Caption}"/>
+                </StackPanel>
+
+                <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="ALL TIMERS" Style="{StaticResource Fog.Overline}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Button Style="{StaticResource Fog.Button.Small}" Command="{Binding PauseAllCommand}" Margin="0,3,6,3" ToolTip="Pause every timer: output off, cycle frozen">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE769;" Style="{StaticResource Fog.Icon}" FontSize="12" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><TextBlock Text="Pause"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource Fog.Button.Small}" Command="{Binding ResumeAllCommand}" Margin="0,3,6,3" ToolTip="Back to automatic cycling">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" Style="{StaticResource Fog.Icon}" FontSize="12" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><TextBlock Text="Resume"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource Fog.Button.Small}" Command="{Binding ResetAllCommand}" Margin="0,3,6,3" ToolTip="Restart every cycle at the beginning of the OFF phase (asks for confirmation)">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE777;" Style="{StaticResource Fog.Icon}" FontSize="12" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><TextBlock Text="Reset"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource Fog.Button.Small}" Command="{Binding ToggleAllCommand}" Margin="0,3,14,3" ToolTip="Flip every timer between ON and OFF">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" Style="{StaticResource Fog.Icon}" FontSize="12" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><TextBlock Text="Toggle"/></StackPanel>
+                    </Button>
+                    <ToggleButton x:Name="TimesToggle" Style="{StaticResource Fog.ToggleButton}" Padding="10,5" FontSize="12.5" Margin="0,3,6,3"
+                                  IsChecked="{Binding BulkPopupOpen, Mode=TwoWay}" IsEnabled="{Binding CanBulk}" Content="Apply times to all..."
+                                  ToolTip="Set the same ON / OFF durations on every timer"/>
+                    <Popup IsOpen="{Binding BulkPopupOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=TimesToggle}" Placement="Bottom"
+                           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="6">
+                        <Border Style="{StaticResource Fog.Card}" Margin="12" Width="330" Background="{DynamicResource Fog.SurfaceRaised}">
+                            <Border.Effect><DropShadowEffect BlurRadius="20" ShadowDepth="3" Opacity="0.4"/></Border.Effect>
+                            <StackPanel>
+                                <TextBlock Text="Apply times to all timers" Style="{StaticResource Fog.Subtitle}"/>
+                                <TextBlock Text="Every paired timer gets the same durations (0.1 to 9999.9 s)." Style="{StaticResource Fog.DimBody}" Margin="0,4,0,12"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <TextBlock Text="ON" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center"/>
+                                    <c:DecimalBox Grid.Column="1" Value="{Binding BulkOn, Mode=TwoWay}" AutomationProperties.Name="ON seconds for all"/>
+                                    <TextBlock Grid.Row="1" Text="OFF" Style="{StaticResource Fog.Subtitle}" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                    <c:DecimalBox Grid.Row="1" Grid.Column="1" Value="{Binding BulkOff, Mode=TwoWay}" Margin="0,8,0,0" AutomationProperties.Name="OFF seconds for all"/>
+                                </Grid>
+                                <Button Style="{StaticResource Fog.Button.Accent}" Content="Apply to all" Margin="0,14,0,0" HorizontalAlignment="Right"
+                                        Command="{Binding ApplyTimesAllCommand}"/>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                    <Button Style="{StaticResource Fog.Button.Small}" Command="{Binding StaggerStartCommand}" Margin="0,3,0,3"
+                            ToolTip="Spread the cycles of all online timers evenly over the OFF time so that they do not all fire at once.">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Fog.Icon}" FontSize="12" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><TextBlock Text="Stagger start"/></StackPanel>
+                    </Button>
+                </WrapPanel>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,6,24,24" Focusable="False">
+                <ItemsControl ItemsSource="{Binding Devices}" Focusable="False" AutomationProperties.Name="Timer cards">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <c:ReflowPanel MinItemWidth="330" MaxItemWidth="540" Spacing="14"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ===== empty state: not connected ===== -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding ShowConnectPrompt, Converter={x:Static cv:Conv.BoolToVisibility}}" Focusable="False">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32" MaxWidth="900">
+                <Border Width="76" Height="76" CornerRadius="22" Background="{DynamicResource Fog.AccentSoft}" HorizontalAlignment="Center">
+                    <TextBlock Text="&#xE9CA;" Style="{StaticResource Fog.Icon}" FontSize="38" Foreground="{DynamicResource Fog.Accent}" HorizontalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="Welcome to Fog Console" Style="{StaticResource Fog.Display}" HorizontalAlignment="Center" Margin="0,22,0,6"/>
+                <TextBlock Style="{StaticResource Fog.DimBody}" HorizontalAlignment="Center" TextAlignment="Center" MaxWidth="620"
+                           Text="Control all your smoke machine timers from one screen, configure them, and find out why the radio link misbehaves. Plug in the remote with its USB cable, or look around with simulated timers first."/>
+                <Grid Margin="0,30,0,0" HorizontalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Command="{Binding ConnectCommand}" Width="340" Height="150" Margin="0,0,14,0" AutomationProperties.Name="Connect to remote"
+                            Style="{StaticResource Fog.Button.Accent}" Padding="22" ToolTip="Open the serial port chosen in the top bar">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="&#xE88E;" Style="{StaticResource Fog.Icon}" FontSize="32" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            <TextBlock Text="Connect to remote" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,4" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Use the port selected at the top" FontSize="12.5" Opacity="0.85" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="1" Command="{Binding StartDemoCommand}" Width="340" Height="150" Margin="14,0,0,0" AutomationProperties.Name="Try offline demo with simulated timers"
+                            Style="{StaticResource Fog.Button}" Padding="22" Background="{DynamicResource Fog.SimSoft}" BorderBrush="{DynamicResource Fog.Sim}" BorderThickness="2"
+                            Foreground="{DynamicResource Fog.Sim}" ToolTip="No hardware needed: ten virtual timers with a realistic radio link">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="&#xE7F8;" Style="{StaticResource Fog.Icon}" FontSize="32" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            <TextBlock Text="Try offline demo" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,4" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Simulated timers - no hardware connected" FontSize="12.5" Opacity="0.9" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <TextBlock Style="{StaticResource Fog.Faint}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,26,0,0" MaxWidth="640" TextWrapping="Wrap"
+                           Text="Tip: the remote appears as an ESP32 USB device. If it does not show up in the port list, press F5 after plugging it in. A timer plugged in directly works too: it looks like a fleet of one."/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ===== empty state: waiting for the device ===== -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="560"
+                    Visibility="{Binding ShowWaiting, Converter={x:Static cv:Conv.BoolToVisibility}}">
+            <ProgressBar IsIndeterminate="True" Width="220" Margin="0,0,0,22"/>
+            <TextBlock Text="Waiting for the device..." Style="{StaticResource Fog.Title}" HorizontalAlignment="Center"/>
+            <TextBlock Style="{StaticResource Fog.DimBody}" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,8,0,0"
+                       Text="The remote is asleep or unplugged, or it is restarting. This window reconnects by itself as soon as the USB port comes back."/>
+        </StackPanel>
+
+        <!-- ===== empty state: connected but nothing paired ===== -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="560"
+                    Visibility="{Binding ShowNoTimers, Converter={x:Static cv:Conv.BoolToVisibility}}">
+            <Border Width="76" Height="76" CornerRadius="22" Background="{DynamicResource Fog.AccentSoft}" HorizontalAlignment="Center">
+                <TextBlock Text="&#xE71B;" Style="{StaticResource Fog.Icon}" FontSize="36" Foreground="{DynamicResource Fog.Accent}" HorizontalAlignment="Center"/>
+            </Border>
+            <TextBlock Text="Pair your first timer" Style="{StaticResource Fog.Display}" HorizontalAlignment="Center" Margin="0,20,0,6"/>
+            <TextBlock Style="{StaticResource Fog.DimBody}" HorizontalAlignment="Center" TextAlignment="Center"
+                       Text="The remote is connected, but no smoke machine timer is paired with it yet. Power up a timer, search for it and pair it - it takes a few seconds."/>
+            <Button Style="{StaticResource Fog.Button.Accent}" Content="Find and pair timers" Command="{Binding GoToPairingCommand}"
+                    HorizontalAlignment="Center" Margin="0,24,0,0" Padding="26,11" FontSize="14"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

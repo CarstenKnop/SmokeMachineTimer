@@ -1,0 +1,327 @@
+<Window x:Class="FogConsole.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:FogConsole.ViewModels"
+        xmlns:v="clr-namespace:FogConsole.Views"
+        xmlns:cv="clr-namespace:FogConsole.Converters"
+        Title="{Binding WindowTitle}" Width="1280" Height="800" MinWidth="1000" MinHeight="640"
+        Background="{DynamicResource Fog.Background}" Foreground="{DynamicResource Fog.Text}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        AutomationProperties.Name="Fog Console">
+
+    <Window.InputBindings>
+        <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Dashboard"/>
+        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Device"/>
+        <KeyBinding Key="D3" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Pairing"/>
+        <KeyBinding Key="D4" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Channels"/>
+        <KeyBinding Key="D5" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Diagnostics"/>
+        <KeyBinding Key="D6" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Console"/>
+        <KeyBinding Key="D7" Modifiers="Ctrl" Command="{Binding GoToCommand}" CommandParameter="Settings"/>
+        <KeyBinding Key="F5" Command="{Binding RefreshPortsCommand}"/>
+    </Window.InputBindings>
+
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}"><v:DashboardView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DeviceDetailViewModel}"><v:DeviceView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PairingViewModel}"><v:PairingView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ChannelsViewModel}"><v:ChannelsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DiagnosticsViewModel}"><v:DiagnosticsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ConsoleViewModel}"><v:ConsoleView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><v:SettingsView/></DataTemplate>
+
+        <!-- navigation rail entry -->
+        <DataTemplate x:Key="NavItemTemplate" DataType="{x:Type vm:NavItem}">
+            <StackPanel HorizontalAlignment="Center" Width="68">
+                <TextBlock Text="{Binding Glyph}" Style="{StaticResource Fog.Icon}" FontSize="20" HorizontalAlignment="Center"
+                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource Fog.Label}" FontSize="11.5" HorizontalAlignment="Center" Margin="0,5,0,0"
+                           TextAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- toast -->
+        <DataTemplate x:Key="ToastTemplate">
+            <Border Style="{StaticResource Fog.Card}" Padding="0" Margin="0,8,0,0" Width="380" CornerRadius="10"
+                    Background="{DynamicResource Fog.SurfaceRaised}"
+                    BorderBrush="{cv:ToneBrush Path=Kind, Part=Border}">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35" Color="Black"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="5"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Background="{cv:ToneBrush Path=Kind, Part=Border}" CornerRadius="10,0,0,10"/>
+                    <TextBlock Grid.Column="1" Margin="14,0,0,0" Foreground="{cv:ToneBrush Path=Kind, Part=Fg}" VerticalAlignment="Top" Padding="0,13,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.Icon}">
+                                <Setter Property="FontSize" Value="18"/>
+                                <Setter Property="Text" Value="&#xE946;"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Success"><Setter Property="Text" Value="&#xE73E;"/></DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Warning"><Setter Property="Text" Value="&#xE7BA;"/></DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Error"><Setter Property="Text" Value="&#xEA39;"/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Grid.Column="2" Text="{Binding Message}" Style="{StaticResource Fog.Label}" TextWrapping="Wrap" TextTrimming="None"
+                               Margin="10,12,6,12" LineHeight="19"/>
+                    <Button Grid.Column="3" Style="{StaticResource Fog.IconButton}" Content="&#xE711;" FontSize="11" Width="26" Height="26"
+                            Margin="0,6,8,0" VerticalAlignment="Top" Command="{Binding DismissCommand}" ToolTip="Dismiss"
+                            AutomationProperties.Name="Dismiss notification"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>   <!-- simulation strip -->
+            <RowDefinition Height="Auto"/>   <!-- top bar -->
+            <RowDefinition Height="Auto"/>   <!-- banners -->
+            <RowDefinition Height="*"/>      <!-- body -->
+            <RowDefinition Height="Auto"/>   <!-- status bar -->
+        </Grid.RowDefinitions>
+
+        <!-- tinted accent along the top edge while simulated -->
+        <Border Grid.Row="0" Height="4" Background="{DynamicResource Fog.Sim}"
+                Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+
+        <!-- ===== top bar ===== -->
+        <Border Grid.Row="1" Background="{DynamicResource Fog.Surface}" BorderBrush="{DynamicResource Fog.Border}" BorderThickness="0,0,0,1" Padding="12,8">
+            <Grid>
+                <Border Background="{DynamicResource Fog.SimSoft}" Margin="-12,-8"
+                        Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}" IsHitTestVisible="False"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="2,0,14,0" VerticalAlignment="Center">
+                        <Border Width="28" Height="28" CornerRadius="8" Background="{DynamicResource Fog.Accent}" Margin="0,0,9,0">
+                            <TextBlock Text="&#xE753;" Style="{StaticResource Fog.Icon}" FontSize="16" Foreground="{DynamicResource Fog.OnAccent}"
+                                       HorizontalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="Fog Console" Style="{StaticResource Fog.Subtitle}" FontSize="15.5" VerticalAlignment="Center"
+                                   Visibility="{Binding IsCompact, Converter={x:Static cv:Conv.InverseBoolToVisibility}}"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Grid>
+                            <ComboBox Width="200" ItemsSource="{Binding Ports}" SelectedItem="{Binding SelectedPort}" DisplayMemberPath="Display"
+                                      IsEnabled="{Binding CanChoosePort}" AutomationProperties.Name="Serial port"
+                                      ToolTip="Serial port of the remote (or of a timer plugged in directly). ESP32 USB devices are recognised by name."/>
+                            <TextBlock Text="{Binding PortPlaceholder}" Style="{StaticResource Fog.Caption}" IsHitTestVisible="False" VerticalAlignment="Center" Margin="12,0,32,0"
+                                       Visibility="{Binding HasSelectedPort, Converter={x:Static cv:Conv.InverseBoolToVisibility}}"/>
+                        </Grid>
+                        <Button Style="{StaticResource Fog.IconButton}" Content="&#xE72C;" Margin="2,0,0,0" Command="{Binding RefreshPortsCommand}"
+                                ToolTip="Refresh the port list (F5)" AutomationProperties.Name="Refresh ports"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                        <Button Style="{StaticResource Fog.Button.Accent}" Content="Connect" MinWidth="96" Command="{Binding ToggleConnectionCommand}"
+                                Visibility="{Binding IsDisconnected, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Connect"
+                                ToolTip="Open the selected serial port"/>
+                        <Button Style="{StaticResource Fog.Button}" Content="Disconnect" MinWidth="96" Command="{Binding ToggleConnectionCommand}"
+                                Visibility="{Binding IsDisconnected, Converter={x:Static cv:Conv.InverseBoolToVisibility}}" AutomationProperties.Name="Disconnect"
+                                ToolTip="Close the connection"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                        <Button Command="{Binding ToggleSimulatorCommand}" AutomationProperties.Name="Simulator" Padding="12,7"
+                                ToolTip="Offline demo: connect to simulated smoke machine timers. No hardware needed.">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource Fog.Button}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSimulated}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource Fog.Sim}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Fog.Sim}"/>
+                                            <Setter Property="Foreground" Value="White"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7F8;" Style="{StaticResource Fog.Icon}" FontSize="14" Margin="0,0,7,0"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <TextBlock Text="Simulator" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            </StackPanel>
+                        </Button>
+                        <ToggleButton x:Name="SimPanelToggle" Style="{StaticResource Fog.ToggleButton}" Margin="4,0,0,0" Padding="9,7"
+                                      IsChecked="{Binding SimPanel.IsOpen, Mode=TwoWay}" ToolTip="Demo controls: timers, packet loss, power cuts, interference, pause, seed"
+                                      Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}"
+                                      AutomationProperties.Name="Simulator demo controls">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE713;" Style="{StaticResource Fog.Icon}" FontSize="14"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                                <TextBlock Text="Demo controls" Margin="7,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                           Visibility="{Binding DataContext.IsCompact, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static cv:Conv.InverseBoolToVisibility}}"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <Popup IsOpen="{Binding SimPanel.IsOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=SimPanelToggle}" Placement="Bottom"
+                               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="6">
+                            <v:SimulatorPanel DataContext="{Binding SimPanel}" Margin="12"/>
+                        </Popup>
+                    </StackPanel>
+
+                    <!-- chips on the right -->
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <Border Style="{StaticResource Fog.Chip.Sim}" Padding="10,4" Margin="0,0,8,0" BorderThickness="1.5"
+                                Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}"
+                                ToolTip="SIMULATED - no hardware connected. Everything you see is virtual; no real machine is controlled."
+                                AutomationProperties.Name="Simulated, no hardware connected">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7F8;" Style="{StaticResource Fog.ChipIcon}" Foreground="{DynamicResource Fog.Sim}"/>
+                                <TextBlock Text="SIMULATED" Style="{StaticResource Fog.ChipText.Sim}" FontSize="12"/>
+                                <TextBlock Text=" &#x2014; no hardware connected" Style="{StaticResource Fog.ChipText.Sim}" FontSize="12"
+                                           Visibility="{Binding DataContext.IsCompact, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static cv:Conv.InverseBoolToVisibility}}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Fog.Chip}" Padding="10,4" Margin="0,0,8,0"
+                                Visibility="{Binding ShowConnectionChip, Converter={x:Static cv:Conv.BoolToVisibility}}"
+                                Background="{cv:ToneBrush Path=ConnectionLevel, Part=Bg}" BorderBrush="{cv:ToneBrush Path=ConnectionLevel, Part=Border}"
+                                ToolTip="{Binding ConnectionDetail}" AutomationProperties.Name="Connection status">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x25CF;" FontSize="11" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{cv:ToneBrush Path=ConnectionLevel}"/>
+                                <TextBlock Text="{Binding ConnectionText}" Style="{StaticResource Fog.ChipText}" Foreground="{cv:ToneBrush Path=ConnectionLevel}" FontSize="12"/>
+                                <TextBlock Text="{Binding LatencyText, StringFormat=' · {0}'}" FontWeight="Normal" FontSize="12"
+                                           Foreground="{cv:ToneBrush Path=ConnectionLevel}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding LatencyText}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Fog.Chip}" Padding="10,4" AutomationProperties.Name="Remote status"
+                                Visibility="{Binding Fleet.Remote.HasData, Converter={x:Static cv:Conv.BoolToVisibility}}"
+                                ToolTip="{Binding RemoteChipTooltip}">
+                            <StackPanel Orientation="Horizontal">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,9,0"
+                                            Visibility="{Binding Fleet.Remote.HasBattery, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                                    <TextBlock Text="{Binding Fleet.Remote.BatteryGlyph}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipIcon}">
+                                                <Setter Property="FontSize" Value="15"/>
+                                                <Setter Property="Margin" Value="0,0,3,0"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Fleet.Remote.IsLowBattery}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource Fog.Bad}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Fleet.Remote.BatteryText}" Style="{StaticResource Fog.ChipText}" FontSize="12"/>
+                                </StackPanel>
+                                <TextBlock Text="&#xE88E;" Style="{StaticResource Fog.ChipIcon}" Margin="0,0,9,0"
+                                           Visibility="{Binding Fleet.Remote.UsbPower, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                                <TextBlock Text="{Binding Fleet.Remote.ChannelText}" Style="{StaticResource Fog.ChipText}" FontSize="12" Margin="0,0,9,0"/>
+                                <TextBlock Text="&#xE72E;" Style="{StaticResource Fog.ChipIcon}" Margin="0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ===== banners ===== -->
+        <StackPanel Grid.Row="2">
+            <Border Background="{DynamicResource Fog.Danger}" Padding="16,9"
+                    Visibility="{Binding Fleet.AnyForceOn, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Force on warning">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE7BA;" Style="{StaticResource Fog.Icon}" Foreground="White" FontSize="17" Margin="0,0,10,0"/>
+                    <TextBlock Text="{Binding ForceOnText}" Foreground="White" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Fog.WarnSoft}" BorderBrush="{DynamicResource Fog.Warn}" BorderThickness="0,0,0,1" Padding="16,8"
+                    Visibility="{Binding IsWaiting, Converter={x:Static cv:Conv.BoolToVisibility}}" AutomationProperties.Name="Waiting for device">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE9CE;" Style="{StaticResource Fog.Icon}" Foreground="{DynamicResource Fog.Warn}" FontSize="16" Margin="0,0,10,0"/>
+                    <TextBlock Text="{Binding WaitingText}" Foreground="{DynamicResource Fog.Warn}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding ConnectionDetail, StringFormat='  ({0})'}" Style="{StaticResource Fog.Caption}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Fog.SimSoft}" BorderBrush="{DynamicResource Fog.Sim}" BorderThickness="0,0,0,1" Padding="16,6"
+                    Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}">
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7F8;" Style="{StaticResource Fog.Icon}" Foreground="{DynamicResource Fog.Sim}" FontSize="14" Margin="0,0,9,0"/>
+                        <TextBlock Text="SIMULATED — no hardware connected." Foreground="{DynamicResource Fog.Sim}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock Text="  Offline demo with virtual timers; nothing you do here reaches a real machine." Style="{StaticResource Fog.Caption}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <Button Style="{StaticResource Fog.Button.Small}" Content="Stop simulation" HorizontalAlignment="Right" Padding="10,3"
+                            Command="{Binding ToggleSimulatorCommand}" AutomationProperties.Name="Stop simulation"/>
+                </Grid>
+            </Border>
+        </StackPanel>
+
+        <!-- ===== body ===== -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="88"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Background="{DynamicResource Fog.Surface}" BorderBrush="{DynamicResource Fog.Border}" BorderThickness="0,0,1,0">
+                <Grid>
+                    <Border Background="{DynamicResource Fog.SimSoft}" IsHitTestVisible="False"
+                            Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                    <ListBox ItemsSource="{Binding NavItems}" SelectedItem="{Binding SelectedNav}" ItemTemplate="{StaticResource NavItemTemplate}"
+                             ItemContainerStyle="{StaticResource Fog.NavItem}" BorderThickness="0" Background="Transparent" Margin="0,10,0,0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             AutomationProperties.Name="Navigation" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                </Grid>
+            </Border>
+
+            <ContentControl Grid.Column="1" Content="{Binding CurrentPage}" Focusable="False" IsTabStop="False"/>
+
+            <v:SimulatorPanel Grid.Column="1" DataContext="{Binding SimPanel}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,12,0"
+                              Visibility="{Binding DataContext.SimPanelInline, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+
+            <ItemsControl Grid.Column="1" ItemsSource="{Binding Toasts.Toasts}" ItemTemplate="{StaticResource ToastTemplate}"
+                          HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,18,18" Focusable="False" IsTabStop="False"/>
+        </Grid>
+
+        <!-- ===== status bar ===== -->
+        <Border Grid.Row="4" Background="{DynamicResource Fog.Surface}" BorderBrush="{DynamicResource Fog.Border}" BorderThickness="0,1,0,0" Padding="14,6">
+            <Grid>
+                <Border Background="{DynamicResource Fog.SimSoft}" Margin="-14,-6" IsHitTestVisible="False"
+                        Visibility="{Binding IsSimulated, Converter={x:Static cv:Conv.BoolToVisibility}}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="&#xE946;" Style="{StaticResource Fog.Icon}" FontSize="13" Margin="0,0,8,0"
+                                   Foreground="{cv:ToneBrush Path=Toasts.StatusKind}"/>
+                        <TextBlock Text="{Binding Toasts.StatusText}" Style="{StaticResource Fog.Caption}" Foreground="{DynamicResource Fog.Text}"
+                                   AutomationProperties.Name="Last message"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding LinesText}" Style="{StaticResource Fog.Faint}" Margin="0,0,16,0" ToolTip="Lines received from the device per second"/>
+                        <TextBlock Text="{Binding BadJsonText}" Style="{StaticResource Fog.Faint}" Margin="0,0,16,0" ToolTip="Lines that looked like JSON but could not be parsed"/>
+                        <TextBlock Text="{Binding ProtocolText}" Style="{StaticResource Fog.Faint}"/>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

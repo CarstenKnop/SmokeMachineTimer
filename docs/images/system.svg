@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b6b7b"/></marker>
+    <style>
+      .box{fill:#f4f7fa;stroke:#5b6b7b;stroke-width:2;rx:12}
+      .rem{fill:#e8f1ff;stroke:#2f6fda;stroke-width:2.5;rx:12}
+      .tim{fill:#fff3e6;stroke:#d9822b;stroke-width:2;rx:12}
+      .pc{fill:#eaf7ee;stroke:#2e8b57;stroke-width:2.5;rx:12}
+      .t{font-size:18px;fill:#1c2630;font-weight:600}
+      .s{font-size:13.5px;fill:#44525f}
+      .l{stroke:#5b6b7b;stroke-width:2;fill:none}
+      .air{stroke:#2f6fda;stroke-width:2.5;fill:none;stroke-dasharray:7 6}
+    </style>
+  </defs>
+  <rect width="960" height="480" fill="#ffffff"/>
+  <text x="480" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#1c2630">FogMachine system</text>
+
+  <!-- remote -->
+  <rect class="rem" x="40" y="130" width="230" height="170"/>
+  <text class="t" x="155" y="165" text-anchor="middle">Remote control</text>
+  <text class="s" x="155" y="190" text-anchor="middle">XIAO ESP32-C3 · OLED · 4 buttons</text>
+  <text class="s" x="155" y="212" text-anchor="middle">LiPo battery · sleeps when idle</text>
+  <text class="s" x="155" y="240" text-anchor="middle">owns the fleet (up to 10 timers)</text>
+  <text class="s" x="155" y="262" text-anchor="middle">USB = charger + PC link</text>
+
+  <!-- timers -->
+  <g>
+    <rect class="tim" x="600" y="70" width="170" height="64"/><text class="t" x="685" y="98" text-anchor="middle">Timer 1</text><text class="s" x="685" y="119" text-anchor="middle">+ smoke machine</text>
+    <rect class="tim" x="640" y="150" width="170" height="64"/><text class="t" x="725" y="178" text-anchor="middle">Timer 2</text><text class="s" x="725" y="199" text-anchor="middle">+ smoke machine</text>
+    <rect class="tim" x="680" y="230" width="170" height="64"/><text class="t" x="765" y="258" text-anchor="middle">Timer 3</text><text class="s" x="765" y="279" text-anchor="middle">+ smoke machine</text>
+    <text class="s" x="940" y="322" text-anchor="end">… up to 10 timers;</text>
+    <text class="s" x="940" y="342" text-anchor="end">each loses power while</text>
+    <text class="s" x="940" y="360" text-anchor="end">its machine heats up.</text>
+  </g>
+
+  <!-- air links -->
+  <path class="air" d="M270 190 C 400 160, 470 110, 598 102" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path class="air" d="M270 215 C 420 215, 520 190, 638 182" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path class="air" d="M270 240 C 420 270, 560 262, 678 262" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="430" y="300" text-anchor="middle" font-size="14" fill="#2f6fda" font-weight="600">ESP-NOW radio, 2.4 GHz (one home channel)</text>
+  <text x="430" y="320" text-anchor="middle" class="s">timers announce every second · commands are echoed</text>
+
+  <!-- PC -->
+  <rect class="pc" x="40" y="340" width="230" height="70"/>
+  <text class="t" x="155" y="372" text-anchor="middle">PC · Fog Console</text>
+  <text class="s" x="155" y="394" text-anchor="middle">remote control · configure · debug</text>
+  <path class="l" d="M155 340 L155 302" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="168" y="326" class="s">USB (JSON lines)</text>
+  <path class="l" stroke-dasharray="3 5" d="M270 392 C 420 462, 700 462, 720 298" marker-end="url(#a)"/>
+  <text x="480" y="470" class="s" text-anchor="middle">a timer can also be plugged into the PC directly (bench work)</text>
+</svg>

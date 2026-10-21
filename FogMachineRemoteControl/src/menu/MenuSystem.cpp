@@ -1,637 +1,416 @@
-// MenuSystem.cpp
-// Handles menu navigation and animated transitions.
-#include "MenuSystem.h"
-#include "comm/CommManager.h"
-#include "Defaults.h"
+#include "menu/MenuSystem.h"
+
 #include <math.h>
+#include "FogLog.h"
 
-// Basic parameters for UI behavior
-static constexpr int VISIBLE_LINES = 5;      // number of menu lines shown
-static constexpr unsigned long NAV_REPEAT_DELAY_MS = 350; // initial hold repeat
-static constexpr unsigned long NAV_REPEAT_INTERVAL_MS = 140; // subsequent repeats
+namespace {
+enum Idx : int {
+    I_PAIR, I_RENAME, I_ACTIVE, I_EDIT_TIMERS, I_LINK_STATUS, I_FIND, I_CHANNEL, I_LINK_TEST, I_AUTO_OFF, I_BRIGHTNESS,
+    I_TX_POWER, I_RSSI_CAL, I_BAT_CAL, I_RESET_TIMER, I_RESET_REMOTE, I_REBOOT, I_SLEEP
+};
+const char kCharset[] = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-";
+}  // namespace
 
-MenuSystem::MenuSystem() : selectedIndex(0), inMenu(false), menuEnterTime(0), scrollOffset(0), lastNavTime(0), lastSelectTime(0) {
-    items = {
-        {"Pair Timer"},
-        {"Rename Device"},
-        {"Active Timer"},
-        {"Edit Timers"},
-        {"OLED Brightness"},
-        {"WiFi TX Power"},
-        {"Show RSSI"},
-        {"Channel Settings"},
-        {"RSSI Calibration"},
-        {"Battery Calibration"},
-        {"Reset Timer"},
-        {"Reset Remote"},
-        {"Auto Off"},
-        {"Reset"}
-    };
+void MenuSystem::begin(Fleet* fleet, RemoteSettings* settings, BatteryMonitor* battery) {
+    fleet_ = fleet;
+    settings_ = settings;
+    battery_ = battery;
+    const RemoteSettingsData& s = settings_->get();
+    autoOffIdx = 3;
+    for (int i = 0; i < 7; ++i) if (kAutoOffOptions[i] == s.autoOffSeconds) autoOffIdx = i;
+    editTxPowerQdbm = s.txPowerQdbm;
+    editBrightness = s.oledBrightness;
+    editRssiLow = s.rssiLowDbm;
+    editRssiHigh = s.rssiHighDbm;
 }
 
-void MenuSystem::begin() {
-    selectedIndex = 0; inMenu = false; scrollOffset = 0; lastNavTime = 0; lastSelectTime = 0; lastActionLabel = nullptr;}
-
-void MenuSystem::update(bool upPressed, bool downPressed, bool hashPressed, bool hashLongPressed, bool starPressed, bool upHeld, bool downHeld) {
-    // Always process when editing timers to keep keys responsive, even if we eventually render over main screen
-    if (!inMenu && mode != Mode::EDIT_TIMERS) return;
-    unsigned long now = millis();
-    (void)hashLongPressed; // intentionally unused here
-    if (mode == Mode::ROOT) {
-        // ROOT MODE: list navigation
-        if (upPressed) {
-            prevSelectedIndex = selectedIndex;
-            int oldScroll = scrollOffset;
-            if (selectedIndex > 0) selectedIndex--; else selectedIndex = (int)items.size() - 1; // wrap
-            clampScroll(); lastNavTime = now; lastSelectionChangeTime = now; animScrollOffsetAtChange = scrollOffset;
-            if (scrollOffset != oldScroll) { // start scroll animation
-                scrollAnimActive = true; scrollAnimStart = now; scrollAnimDir = -1; prevScrollOffset = oldScroll; }
-        }
-        if (downPressed) {
-            prevSelectedIndex = selectedIndex;
-            int oldScroll = scrollOffset;
-            if (selectedIndex < (int)items.size() - 1) selectedIndex++; else selectedIndex = 0; // wrap
-            clampScroll(); lastNavTime = now; lastSelectionChangeTime = now; animScrollOffsetAtChange = scrollOffset;
-            if (scrollOffset != oldScroll) { scrollAnimActive = true; scrollAnimStart = now; scrollAnimDir = +1; prevScrollOffset = oldScroll; }
-        }
-        if (hashPressed) {
-            lastSelectTime = now;
-            lastActionLabel = items[selectedIndex].label;
-            // Determine action
-            const char* label = items[selectedIndex].label;
-            if (strcmp(label, "Auto Off") == 0) {
-                startBlankingEdit();
-            } else if (strcmp(label, "Pair Timer") == 0) {
-                enterPairing();
-            } else if (strcmp(label, "Rename Device") == 0) {
-                const char* seed = "NAME"; if (auto *comm = CommManager::get()) { const SlaveDevice* act = comm->getActiveDevice(); if (act && act->name[0]) seed = act->name; }
-                enterEditName(seed);
-            } else if (strcmp(label, "Active Timer") == 0) {
-                enterSelectActive(false);
-            } else if (strcmp(label, "Edit Timers") == 0) {
-                auto *comm = CommManager::get();
-                float ton=1.0f, toff=1.0f;
-                if (comm) {
-                    const SlaveDevice* act = comm->getActiveDevice();
-                    if (act) { ton = act->ton; toff = act->toff; }
-                }
-                enterEditTimers(ton, toff);
-            } else if (strcmp(label, "WiFi TX Power") == 0) {
-                enterTxPower();
-            } else if (strcmp(label, "OLED Brightness") == 0) {
-                enterBrightness();
-            } else if (strcmp(label, "RSSI Calibration") == 0) {
-                enterRssiCalib();
-            } else if (strcmp(label, "Show RSSI") == 0) {
-                enterShowRssi();
-            } else if (strcmp(label, "Channel Settings") == 0) {
-                enterChannelSettings();
-            } else if (strcmp(label, "Battery Calibration") == 0) {
-                enterBatteryCal();
-            } else if (strcmp(label, "Reset Timer") == 0) {
-                enterConfirm(ConfirmAction::RESET_SLAVE);
-            } else if (strcmp(label, "Reset Remote") == 0) {
-                enterConfirm(ConfirmAction::RESET_REMOTE);
-            } else if (strcmp(label, "Reset") == 0) {
-                enterConfirm(ConfirmAction::POWER_CYCLE);
-            } else {
-                // unknown item -> stay
-            }
-            return;
-        }
-    if (starPressed) { exitMenu(); return; }
-    // Long hash does not exit while inside menu; star is used for back
-    } else if (mode == Mode::EDIT_BLANKING) {
-        // EDITING AUTO OFF
-        if (upPressed) {
-            if (blankingIndex < BLANKING_OPTION_COUNT - 1) blankingIndex++;
-        }
-        if (downPressed) {
-            if (blankingIndex > 0) blankingIndex--;
-        }
-        if (starPressed) { // cancel -> revert index to applied value and go back to root
-            cancelBlankingEdit();
-            return;
-        }
-        if (hashPressed) { // confirm -> apply and go back to root
-            confirmBlankingEdit(false); // stay in menu
-            return;
-        }
-        // Long hash no-op while editing (selection done on short press)
-    } else if (mode == Mode::EDIT_TXPOWER) {
-        // Up/Down adjust in steps of 1 qdbm (0.25 dBm). Clamp 0..84.
-        if (upPressed)   { if (editTxPowerQdbm < 84) editTxPowerQdbm++; }
-        if (downPressed) { if (editTxPowerQdbm > 0)  editTxPowerQdbm--; }
-        if (starPressed) { // cancel -> revert to applied and back to root
-            editTxPowerQdbm = appliedTxPowerQdbm; mode = Mode::ROOT; return;
-        }
-        if (hashPressed) { // save
-            txSavePending = true; appliedTxPowerQdbm = editTxPowerQdbm; mode = Mode::ROOT; return;
-        }
-    } else if (mode == Mode::EDIT_BRIGHTNESS) {
-        // Up/Down adjust brightness (0..255)
-        if (upPressed)   { if (editOledBrightness < 255) editOledBrightness = (uint8_t)min<int>(255, editOledBrightness + 5); }
-        if (downPressed) { if (editOledBrightness > 5)   editOledBrightness = (uint8_t)max<int>(5, editOledBrightness - 5); else editOledBrightness = 5; }
-        if (starPressed) { editOledBrightness = appliedOledBrightness; if (editOledBrightness < 5) editOledBrightness = 5; mode = Mode::ROOT; return; }
-        if (hashPressed) { if (editOledBrightness < 5) editOledBrightness = 5; brightSavePending = true; appliedOledBrightness = editOledBrightness; mode = Mode::ROOT; return; }
-    } else if (mode == Mode::PAIRING) {
-        auto *comm = CommManager::get();
-        if (!comm) { if (starPressed) { mode = Mode::ROOT; } return; }
-        // Ensure discovery runs continuously on this screen
-        if (!comm->isDiscovering()) comm->startDiscovery(0);
-        int discCount = comm->getDiscoveredCount();
-        // Up/Down navigate discovered list (wrap)
-        if (upPressed && discCount>0) {
-            if (pairingSelIndex > 0) pairingSelIndex--; else pairingSelIndex = discCount-1;
-        }
-        if (downPressed && discCount>0) {
-            if (pairingSelIndex < discCount-1) pairingSelIndex++; else pairingSelIndex = 0;
-        }
-        if (pairingSelIndex >= discCount) pairingSelIndex = discCount>0 ? discCount-1 : 0;
-        // '#' pairs or unpairs the selected device, stays on screen for multiple operations
-        if (hashPressed && discCount>0) {
-            const auto &d = comm->getDiscovered(pairingSelIndex);
-            int pairedIdx = comm->findPairedIndexByMac(d.mac);
-            if (pairedIdx >= 0) {
-                // Unpair
-                comm->unpairByMac(d.mac);
-            } else {
-                // Pair
-                comm->pairWithIndex(pairingSelIndex);
-            }
-            return;
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::CHANNEL_SETTINGS) {
-        auto startRescan = [&]() {
-            channelOptions.clear();
-            channelSelection = 0;
-            channelScanActive = true;
-            channelScanPending = true;
-            channelScanFailed = false;
-        };
-        if (channelScanActive) {
-            if (starPressed) {
-                channelScanActive = false;
-                channelScanPending = false;
-                channelScanFailed = false;
-                mode = Mode::ROOT;
-            }
-            return;
-        }
-        if ((channelOptions.empty() && hashPressed) || (hashLongPressed && !hashPressed)) {
-            startRescan();
-            return;
-        }
-        if (channelOptions.empty()) {
-            if (starPressed) { mode = Mode::ROOT; return; }
-            return;
-        }
-        if (hashPressed) {
-            channelSavePending = true;
-            channelSaveValue = channelOptions[channelSelection].channel;
-            mode = Mode::ROOT;
-            return;
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
-        if (upPressed && channelSelection > 0) channelSelection--;
-        if (downPressed && channelSelection < (int)channelOptions.size() - 1) channelSelection++;
-    } else if (mode == Mode::MANAGE_DEVICES) {
-        // Manage Devices: Up/Down navigate paired device list
-        auto *comm = CommManager::get();
-        int count = comm ? comm->getPairedCount() : 0;
-        if (upPressed && count>0) { if (manageSelIndex>0) manageSelIndex--; else manageSelIndex = count-1; }
-        if (downPressed && count>0) { if (manageSelIndex < count-1) manageSelIndex++; else manageSelIndex = 0; }
-        if (hashPressed && count>0) {
-            // Short press: activate this device
-            comm->activateDeviceByIndex(manageSelIndex);
-            return;
-        }
-        // Long press hash to delete (if more than one device) – simple heuristic: detect if hashLongPressed and not just pressed
-        if (hashLongPressed && !hashPressed && count>0) {
-            if (count>1) {
-                comm->removeDeviceByIndex(manageSelIndex);
-                int newCount = comm->getPairedCount();
-                if (manageSelIndex >= newCount) manageSelIndex = newCount>0?newCount-1:0;
-            }
-            return;
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::EDIT_NAME) {
-        // Name editor: small font per-char editing, extended charset with hold-to-repeat
-        auto *comm = CommManager::get();
-        unsigned long nowMs = millis();
-        static unsigned long nameHoldStartUp = 0, nameHoldStartDown = 0, nameLastRepeatMs = 0;
-        // Character set order: space, 0-9, A-Z, a-z
-        static const char* CHARSET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        static const int CHARSET_LEN = 1 + 10 + 26 + 26;
-        auto nextChar=[&](char c){
-            // Default to space if unknown
-            int idx = 0;
-            for (int i=0;i<CHARSET_LEN;i++){ if (CHARSET[i]==c){ idx=i; break; } }
-            return CHARSET[(idx+1)%CHARSET_LEN];
-        };
-        auto prevChar=[&](char c){
-            int idx = 0;
-            for (int i=0;i<CHARSET_LEN;i++){ if (CHARSET[i]==c){ idx=i; break; } }
-            return CHARSET[(idx-1+CHARSET_LEN)%CHARSET_LEN];
-        };
-        auto applyChar=[&](int dir){
-            char &ch = renameBuf[renamePos];
-            if (ch==0) ch=' ';
-            ch = (dir>0) ? nextChar(ch) : prevChar(ch);
-        };
-        if (upPressed)   { applyChar(+1); nameHoldStartUp = nowMs; nameLastRepeatMs = 0; return; }
-        if (downPressed) { applyChar(-1); nameHoldStartDown = nowMs; nameLastRepeatMs = 0; return; }
-        bool anyHeld=false; if (upHeld) { anyHeld=true; if (!nameHoldStartUp) nameHoldStartUp=nowMs; } else nameHoldStartUp=0; if (downHeld) { anyHeld=true; if (!nameHoldStartDown) nameHoldStartDown=nowMs; } else nameHoldStartDown=0;
-        if (anyHeld) {
-            unsigned long start = nameHoldStartUp ? nameHoldStartUp : nameHoldStartDown;
-            if (nowMs - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
-                if (nameLastRepeatMs==0 || (nowMs - nameLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
-                    if (upHeld) applyChar(+1); if (downHeld) applyChar(-1);
-                    nameLastRepeatMs = nowMs; return;
-                }
-            }
-        } else { nameLastRepeatMs = 0; }
-        // '#' short press: move right; at end -> save and exit. Long-press: move left
-        if (hashPressed) {
-            if (renamePos < (int)sizeof(renameBuf)-2) { renamePos++; if (renameBuf[renamePos]==0) renameBuf[renamePos]=' '; return; }
-            if (comm) comm->setActiveName(renameBuf);
-            mode = Mode::ROOT; return;
-        }
-        if (hashLongPressed && !hashPressed) { // long hold -> move left
-            if (renamePos > 0) renamePos--; else {
-                // wrap to last non-NUL position
-                int last=0; for (int i=0; i<(int)sizeof(renameBuf)-1; ++i) { if (renameBuf[i]==0) break; last=i; }
-                renamePos = last;
-            }
-            return;
-        }
-        if (starPressed) {
-            // STAR cancels/returns: exit without saving
-            mode = Mode::ROOT; return;
-        }
-    } else if (mode == Mode::SELECT_ACTIVE) {
-        // Navigate paired device list (DeviceManager consulted only for count via external code / DisplayManager)
-        // We can't access DeviceManager directly here without coupling; we rely on main/Display to clamp.
-        if (upPressed) {
-            if (activeSelIndex > 0) activeSelIndex--; else activeSelIndex = 0; // clamp; main may wrap if desired
-        }
-        if (downPressed) {
-            activeSelIndex++; // will be clamped externally if beyond count
-        }
-        if (hashPressed) {
-            // Trigger selection consumption in main loop
-            activeSelectTriggered = true;
-            activeSelectIndexPending = activeSelIndex;
-            if (selectActiveReturnToMain) {
-                // Exit to main screen (leave inMenu=false)
-                inMenu = false; mode = Mode::ROOT; menuExitTime = millis();
-            } else {
-                // Return to menu root
-                mode = Mode::ROOT;
-            }
-            return;
-        }
-        if (starPressed) {
-            if (selectActiveReturnToMain) { inMenu = false; mode = Mode::ROOT; menuExitTime = millis(); }
-            else { mode = Mode::ROOT; }
-            return;
-        }
-    } else if (mode == Mode::SHOW_RSSI) {
-        auto *comm = CommManager::get();
-        int count = comm ? comm->getPairedCount() : 0;
-        // Up/Down scroll list
-        if (upPressed) { if (rssiFirstIndex > 0) rssiFirstIndex--; }
-        if (downPressed) { if (rssiFirstIndex < (count>0?count-1:0)) rssiFirstIndex++; }
-        // '#' refresh all RSSI by requesting status from each paired device
-        if (hashPressed && comm) {
-            for (int i=0;i<comm->getPairedCount();++i) {
-                comm->requestStatus(comm->getPaired(i));
-            }
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::BATTERY_CALIB) {
-        // Battery Calibration keys with hold-to-repeat:
-        // - Before start: '#' begins editing, '*' cancels/back
-        // - During edit: Up/Down adjust current point (with repeat); '#' advances and saves at the end; '*' cancels without saving
-        if (!calibInProgress) {
-            if (hashPressed) { calibInProgress = true; editCalibIndex = 0; return; }
-            if (starPressed) { mode = Mode::ROOT; return; }
-            // Ignore other keys until started
-        } else {
-            // Edge increments
-            if (upPressed)   { editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5); calibHoldStartUp = now; calibLastRepeatMs = 0; }
-            if (downPressed){ editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5); calibHoldStartDown = now; calibLastRepeatMs = 0; }
-            // Hold-to-repeat
-            bool anyHeld = false;
-            if (upHeld)   { anyHeld = true; if (calibHoldStartUp==0) calibHoldStartUp = now; }
-            else calibHoldStartUp = 0;
-            if (downHeld) { anyHeld = true; if (calibHoldStartDown==0) calibHoldStartDown = now; }
-            else calibHoldStartDown = 0;
-            if (anyHeld) {
-                unsigned long start = calibHoldStartUp ? calibHoldStartUp : calibHoldStartDown;
-                if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
-                    if (calibLastRepeatMs==0 || (now - calibLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
-                        if (upHeld)   editCalib[editCalibIndex] = (uint16_t)min(4095, (int)editCalib[editCalibIndex] + 5);
-                        if (downHeld) editCalib[editCalibIndex] = (uint16_t)max(0,    (int)editCalib[editCalibIndex] - 5);
-                        calibLastRepeatMs = now;
-                        return;
-                    }
-                }
-            } else {
-                calibLastRepeatMs = 0;
-            }
-            if (hashPressed) {
-                if (editCalibIndex < 2) { editCalibIndex++; }
-                else { calibSavePending = true; mode = Mode::ROOT; calibInProgress = false; return; }
-            }
-            if (starPressed) { mode = Mode::ROOT; calibInProgress = false; return; }
-        }
-    } else if (mode == Mode::EDIT_RSSI_CALIB) {
-        // Edit Low (0 bars) and High (6 bars) thresholds in dBm with hold-to-repeat
-        auto clamp=[&](){
-            if (editRssiHighDbm < editRssiLowDbm + 5) editRssiHighDbm = (int8_t)(editRssiLowDbm + 5);
-            if (editRssiHighDbm > 0) editRssiHighDbm = 0;
-            if (editRssiLowDbm < -120) editRssiLowDbm = -120;
-        };
-        if (upPressed)   { if (rssiEditIndex==0) editRssiLowDbm++; else editRssiHighDbm++; rssiHoldStartUp = now; rssiLastRepeatMs=0; clamp(); return; }
-        if (downPressed) { if (rssiEditIndex==0) editRssiLowDbm--; else editRssiHighDbm--; rssiHoldStartDown = now; rssiLastRepeatMs=0; clamp(); return; }
-        bool anyHeld=false;
-        if (upHeld)   { anyHeld=true; if (!rssiHoldStartUp) rssiHoldStartUp=now; } else rssiHoldStartUp=0;
-        if (downHeld) { anyHeld=true; if (!rssiHoldStartDown) rssiHoldStartDown=now; } else rssiHoldStartDown=0;
-        if (anyHeld) {
-            unsigned long start = rssiHoldStartUp ? rssiHoldStartUp : rssiHoldStartDown;
-            if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
-                if (rssiLastRepeatMs==0 || (now - rssiLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
-                    if (upHeld)   { if (rssiEditIndex==0) editRssiLowDbm++; else editRssiHighDbm++; }
-                    if (downHeld) { if (rssiEditIndex==0) editRssiLowDbm--; else editRssiHighDbm--; }
-                    rssiLastRepeatMs = now; clamp(); return;
-                }
-            }
-        } else {
-            rssiLastRepeatMs = 0;
-        }
-        if (hashPressed) {
-            if (rssiEditIndex == 0) { rssiEditIndex = 1; }
-            else { appliedRssiLowDbm = editRssiLowDbm; appliedRssiHighDbm = editRssiHighDbm; rssiSavePending = true; mode = Mode::ROOT; return; }
-            return;
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
-    } else if (mode == Mode::EDIT_TIMERS) {
-        // Edit two timer values in tenths: first TOFF digits [0..DIGITS-1], then TON digits [DIGITS..2*DIGITS-1]
-        auto tweakDigit=[&](int &tenths, int whichDigit, int delta){
-            // whichDigit 0..(Defaults::DIGITS-1) with 0=most significant
-            // Change only that digit (wrap within 0..9), no carry to other digits
-            int pow10 = 1;
-            for (int i=0;i<Defaults::DIGITS-whichDigit-1;i++) pow10 *= 10; // digit place weight
-            int digit = (tenths / pow10) % 10;
-            digit = (digit + delta) % 10; if (digit < 0) digit += 10;
-            // Clear that digit and set new value
-            tenths = tenths - ((tenths / pow10) % 10) * pow10 + digit * pow10;
-            if (tenths < 0) tenths = 0; if (tenths > 99999) tenths = 99999;
-        };
-        int which = editDigitIndex;
-        bool editingToff = (which < Defaults::DIGITS);
-        int digitIn = editingToff ? which : (which - Defaults::DIGITS);
-        auto applyStep=[&](int s){ if (editingToff) tweakDigit(editToffTenths, digitIn, s); else tweakDigit(editTonTenths, digitIn, s); };
-        // Edge presses
-        if (upPressed)   { applyStep(+1); editHoldStartUp = now; editLastRepeatMs = 0; return; }
-        if (downPressed) { applyStep(-1); editHoldStartDown = now; editLastRepeatMs = 0; return; }
-        // Hold-to-repeat
-        bool anyHeld = false;
-        if (upHeld)   { anyHeld = true; if (editHoldStartUp==0) editHoldStartUp=now; }
-        else editHoldStartUp = 0;
-        if (downHeld) { anyHeld = true; if (editHoldStartDown==0) editHoldStartDown=now; }
-        else editHoldStartDown = 0;
-        if (anyHeld) {
-            unsigned long start = editHoldStartUp ? editHoldStartUp : editHoldStartDown;
-            if (now - start >= Defaults::EDIT_INITIAL_DELAY_MS) {
-                if (editLastRepeatMs==0 || (now - editLastRepeatMs) >= Defaults::EDIT_REPEAT_INTERVAL_MS) {
-                    if (upHeld) applyStep(+1); if (downHeld) applyStep(-1);
-                    editLastRepeatMs = now;
-                    return;
-                }
-            }
-        } else {
-            editLastRepeatMs = 0;
-        }
-        if (hashPressed) {
-            // Move to next digit; if beyond last, clamp to slave bounds, save and exit
-            editDigitIndex++;
-            if (editDigitIndex >= 2*Defaults::DIGITS) {
-                // Send to active device
-                auto *comm = CommManager::get();
-                // Clamp to slave min/max (tenths) before sending
-                int toff = editToffTenths;
-                int ton  = editTonTenths;
-                if (toff < (int)Defaults::SLAVE_TIMER_MIN_TENTHS) toff = (int)Defaults::SLAVE_TIMER_MIN_TENTHS;
-                if (toff > (int)Defaults::SLAVE_TIMER_MAX_TENTHS) toff = (int)Defaults::SLAVE_TIMER_MAX_TENTHS;
-                if (ton  < (int)Defaults::SLAVE_TIMER_MIN_TENTHS) ton  = (int)Defaults::SLAVE_TIMER_MIN_TENTHS;
-                if (ton  > (int)Defaults::SLAVE_TIMER_MAX_TENTHS) ton  = (int)Defaults::SLAVE_TIMER_MAX_TENTHS;
-                if (comm) comm->setActiveTimer((float)ton/10.0f, (float)toff/10.0f);
-                // Exit edit mode completely
-                exitMenu();
-            }
-            return;
-        }
-        // Long-press '#' moves cursor left for symmetry
-        if (hashLongPressed && !hashPressed) {
-            if (editDigitIndex > 0) editDigitIndex--; else editDigitIndex = 2*Defaults::DIGITS - 1;
-            return;
-        }
-        if (starPressed) { exitMenu(); return; }
-    } else if (mode == Mode::CONFIRM) {
-        if (hashPressed) {
-            if (confirmAction == ConfirmAction::RESET_SLAVE) {
-                if (auto *comm = CommManager::get()) comm->factoryResetActive();
-                exitMenu();
-                return;
-            } else if (confirmAction == ConfirmAction::RESET_REMOTE) {
-                remoteResetPending = true;
-                exitMenu();
-                return;
-            } else if (confirmAction == ConfirmAction::POWER_CYCLE) {
-                // Request a power cycle (software restart) of the remote
-                powerCyclePending = true;
-                exitMenu();
-                return;
-            }
-        }
-        if (starPressed) { mode = Mode::ROOT; return; }
+const char* MenuSystem::modeName() const {
+    if (!inMenu) return "main";
+    switch (mode) {
+        case Mode::ROOT: return "menu";
+        case Mode::EDIT_AUTO_OFF: return "autoOff";
+        case Mode::EDIT_TXPOWER: return "txPower";
+        case Mode::EDIT_BRIGHTNESS: return "brightness";
+        case Mode::PAIRING: return "pairing";
+        case Mode::SELECT_ACTIVE: return "select";
+        case Mode::LINK_STATUS: return "linkStatus";
+        case Mode::BATTERY_CALIB: return "batteryCal";
+        case Mode::EDIT_RSSI_CALIB: return "rssiCal";
+        case Mode::EDIT_TIMERS: return "editTimers";
+        case Mode::EDIT_NAME: return "rename";
+        case Mode::CONFIRM: return "confirm";
+        case Mode::CHANNEL: return "channel";
+        case Mode::FIND_TIMERS: return "find";
+        case Mode::LINK_TEST: return "linkTest";
     }
-    // Housekeeping: turn off scroll animation if elapsed
-    if (scrollAnimActive && (millis() - scrollAnimStart >= SCROLL_ANIM_MS)) scrollAnimActive = false;
+    return "menu";
 }
 
 void MenuSystem::enterMenu() {
     inMenu = true;
-    menuEnterTime = millis();
-    lastActionLabel = nullptr;
-    mode = Mode::ROOT; // always start at root
-    prevSelectedIndex = selectedIndex;
-    lastSelectionChangeTime = millis();
-    animScrollOffsetAtChange = scrollOffset;
+    mode = Mode::ROOT;
+    prevSelected = selected;
+    lastSelChange = millis();
+    animScroll = scrollOffset;
 }
 
 void MenuSystem::exitMenu() {
+    if (mode == Mode::PAIRING && fleet_) fleet_->stopDiscovery();
     inMenu = false;
-    mode = Mode::ROOT; // reset to root
-    menuExitTime = millis();
-}
-
-void MenuSystem::nextItem() {
-    if (inMenu && selectedIndex < (int)items.size() - 1) { selectedIndex++; clampScroll(); }
-}
-
-void MenuSystem::prevItem() {
-    if (inMenu && selectedIndex > 0) { selectedIndex--; clampScroll(); }
-}
-
-int MenuSystem::getSelectedIndex() const {
-    return selectedIndex;
-}
-
-const char* MenuSystem::getCurrentMenuName() const {
-    if (inMenu && selectedIndex < (int)items.size()) return items[selectedIndex].label;
-    return "";
-}
-
-bool MenuSystem::isInMenu() const {
-    return inMenu;
-}
-
-int MenuSystem::getVisibleStart() const { return scrollOffset; }
-
-int MenuSystem::getVisibleCount(int maxLines) const {
-    int remain = (int)items.size() - scrollOffset;
-    return remain < maxLines ? remain : maxLines;
-}
-
-bool MenuSystem::isAnimatingEnter() const {
-    if (!inMenu) return false;
-    return millis() - menuEnterTime < 200; // simple 200ms enter phase
-}
-
-void MenuSystem::clampScroll() {
-    if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
-    else if (selectedIndex >= scrollOffset + VISIBLE_LINES) scrollOffset = selectedIndex - VISIBLE_LINES + 1;
-    if (scrollOffset < 0) scrollOffset = 0;
-    if (scrollOffset > (int)items.size() - 1) scrollOffset = (int)items.size() - 1;
-}
-
-// --- Blanking edit helpers ---
-void MenuSystem::startBlankingEdit() {
-    mode = Mode::EDIT_BLANKING;
-    // Set index to current applied value so editing starts from active setting
-    blankingIndex = findBlankingIndexFor(appliedBlankingSeconds);
-}
-
-void MenuSystem::cancelBlankingEdit() {
-    // Restore index to applied (already) and return to root
-    blankingIndex = findBlankingIndexFor(appliedBlankingSeconds);
     mode = Mode::ROOT;
+    menuExitTime_ = millis();
 }
 
-void MenuSystem::confirmBlankingEdit(bool exitMenuAfter) {
-    appliedBlankingSeconds = blankingOptions[blankingIndex];
-    blankSavePending = true; // signal persistence
-    mode = Mode::ROOT;
-    if (exitMenuAfter) exitMenu();
+void MenuSystem::enterSelectActive(bool returnToMain) {
+    inMenu = true;
+    mode = Mode::SELECT_ACTIVE;
+    selectReturnsToMain_ = returnToMain;
+    activeSel = fleet_ && fleet_->getActiveIndex() >= 0 ? fleet_->getActiveIndex() : 0;
 }
 
-int MenuSystem::findBlankingIndexFor(int seconds) const {
-    for (int i=0;i<BLANKING_OPTION_COUNT;++i) if (blankingOptions[i]==seconds) return i;
-    // If not found, clamp to nearest
-    if (seconds < blankingOptions[0]) return 0;
-    if (seconds > blankingOptions[BLANKING_OPTION_COUNT-1]) return BLANKING_OPTION_COUNT-1;
-    // fallback
-    return 0;
-}
-
-// --- Other mode helpers ---
-void MenuSystem::enterPairing() {
+void MenuSystem::enterEditTimers() {
+    const SlaveDevice* a = fleet_ ? fleet_->getActiveDevice() : nullptr;
+    if (!a) { if (fleet_) fleet_->showToast("No timer selected", millis()); return; }
     inMenu = true;
-    mode = Mode::PAIRING;
-    pairingScanning = false;
-    pairingSelIndex = 0;
-    // Auto-start discovery for better UX
-    if (auto *comm = CommManager::get()) {
-        if (!comm->isDiscovering()) comm->startDiscovery(0); // continuous while on screen
-    }
-}
-void MenuSystem::enterManageDevices() { inMenu = true; mode = Mode::MANAGE_DEVICES; }
-void MenuSystem::enterRename() { mode = Mode::RENAME_DEVICE; renameInEdit = false; }
-void MenuSystem::enterEditName(const char* initialName) {
-    inMenu = true; mode = Mode::EDIT_NAME; strncpy(renameBuf, initialName, sizeof(renameBuf)-1); renameBuf[sizeof(renameBuf)-1]=0; renamePos = 0;
-}
-void MenuSystem::enterSelectActive(bool returnToMain) { inMenu = true; mode = Mode::SELECT_ACTIVE; selectActiveReturnToMain = returnToMain; }
-void MenuSystem::enterShowRssi() {
-    mode = Mode::SHOW_RSSI;
-    if (auto *comm = CommManager::get()) comm->requestStatusActive();
-}
-void MenuSystem::enterChannelSettings() {
-    inMenu = true;
-    mode = Mode::CHANNEL_SETTINGS;
-    channelOptions.clear();
-    channelSelection = 0;
-    channelScanFailed = false;
-    channelScanActive = true;
-    channelScanPending = true;
-}
-void MenuSystem::enterBatteryCal() { mode = Mode::BATTERY_CALIB; calibInProgress = false; }
-void MenuSystem::enterRssiCalib() {
-    inMenu = true;
-    mode = Mode::EDIT_RSSI_CALIB;
-    // Reset edit focus to Low and seed edit values from applied on entry
-    rssiEditIndex = 0; // start editing Low
-    editRssiLowDbm = appliedRssiLowDbm;
-    editRssiHighDbm = appliedRssiHighDbm;
-}
-void MenuSystem::enterEditTimers(float tonSecInit, float toffSecInit) {
-    inMenu = true; // treat as a modal to capture input reliably
     mode = Mode::EDIT_TIMERS;
-    // Convert to tenths and clamp 0..99999
-    editTonTenths = (int)roundf(tonSecInit * 10.0f); if (editTonTenths<0) editTonTenths=0; if (editTonTenths>99999) editTonTenths=99999;
-    editToffTenths = (int)roundf(toffSecInit * 10.0f); if (editToffTenths<0) editToffTenths=0; if (editToffTenths>99999) editToffTenths=99999;
+    editTonTenths = constrain((int)roundf(a->ton * 10.0f), 0, 99999);
+    editToffTenths = constrain((int)roundf(a->toff * 10.0f), 0, 99999);
     editDigitIndex = 0;
 }
 
-void MenuSystem::enterTxPower() {
-    mode = Mode::EDIT_TXPOWER;
-    // Seed edit value from applied so the UI starts at the current setting
-    editTxPowerQdbm = appliedTxPowerQdbm;
+void MenuSystem::enterRename() {
+    const SlaveDevice* a = fleet_ ? fleet_->getActiveDevice() : nullptr;
+    if (!a) { fleet_->showToast("No timer selected", millis()); return; }
+    mode = Mode::EDIT_NAME;
+    memset(nameBuf, 0, sizeof(nameBuf));
+    strncpy(nameBuf, a->name[0] ? a->name : "Timer", sizeof(nameBuf) - 1);
+    for (size_t i = strlen(nameBuf); i < sizeof(nameBuf) - 1; ++i) nameBuf[i] = ' ';     // always 9 editable cells
+    namePos = 0;
 }
 
-void MenuSystem::enterBrightness() {
-    mode = Mode::EDIT_BRIGHTNESS;
-    // Seed edit value from applied so the UI starts at the current setting
-    editOledBrightness = appliedOledBrightness;
+void MenuSystem::clampScroll() {
+    if (selected < scrollOffset) scrollOffset = selected;
+    else if (selected >= scrollOffset + kVisibleLines) scrollOffset = selected - kVisibleLines + 1;
+    if (scrollOffset < 0) scrollOffset = 0;
 }
 
-void MenuSystem::setChannelScanResult(const std::vector<ChannelOption>& options, uint8_t currentChannel) {
-    channelOptions = options;
-    channelScanActive = false;
-    channelScanFailed = options.empty();
-    channelCurrent = currentChannel;
-    if (channelOptions.empty()) {
-        channelSelection = 0;
-        return;
-    }
-    channelSelection = 0;
-    for (size_t i = 0; i < channelOptions.size(); ++i) {
-        if (channelOptions[i].channel == currentChannel) {
-            channelSelection = static_cast<int>(i);
+// Up/Down with initial delay + repeat, accelerating while held. Returns -1, 0 or +1 per call.
+int MenuSystem::holdSteps(const ButtonInput& b, uint32_t now, Hold& h) {
+    if (b.upPressed())   { h.upStart = now; h.downStart = 0; h.last = now; return +1; }
+    if (b.downPressed()) { h.downStart = now; h.upStart = 0; h.last = now; return -1; }
+    const bool up = b.upHeld(), down = b.downHeld();
+    if (!up) h.upStart = 0;
+    if (!down) h.downStart = 0;
+    if (!up && !down) return 0;
+    const uint32_t start = up ? h.upStart : h.downStart;
+    if (!start) return 0;
+    const uint32_t held = now - start;
+    if (held < Defaults::EDIT_INITIAL_DELAY_MS) return 0;
+    const uint32_t interval = held > 2000 ? Defaults::EDIT_REPEAT_INTERVAL_MS / 3 : (held > 1000 ? Defaults::EDIT_REPEAT_INTERVAL_MS / 2 : Defaults::EDIT_REPEAT_INTERVAL_MS);
+    if (now - h.last < interval) return 0;
+    h.last = now;
+    return up ? +1 : -1;
+}
+
+void MenuSystem::update(const ButtonInput& b, uint32_t now) {
+    if (!inMenu) return;
+    ignoreHash_ = swallowHash_;
+    if (b.hashReleased()) swallowHash_ = false;                 // the swallowed press is over after this cycle
+    switch (mode) {
+        case Mode::ROOT: updateRoot(b, now); break;
+        case Mode::EDIT_AUTO_OFF:
+        case Mode::EDIT_TXPOWER:
+        case Mode::EDIT_BRIGHTNESS: updateSimpleEdit(b, now); break;
+        case Mode::PAIRING: updatePairing(b); break;
+        case Mode::SELECT_ACTIVE: {
+            const int n = fleet_->getPairedCount();
+            if (n > 0) {
+                if (b.upPressed()) activeSel = (activeSel + n - 1) % n;
+                if (b.downPressed()) activeSel = (activeSel + 1) % n;
+                if (activeSel >= n) activeSel = n - 1;
+            }
+            if (b.hashPressed() && n > 0) {
+                fleet_->setActive(activeSel);
+                if (selectReturnsToMain_) exitMenu(); else toRoot();
+            } else if (b.starPressed()) {
+                if (selectReturnsToMain_) exitMenu(); else toRoot();
+            }
             break;
         }
+        case Mode::LINK_STATUS: {
+            const int n = fleet_->getPairedCount();
+            if (b.upPressed() && linkFirst > 0) --linkFirst;
+            if (b.downPressed() && linkFirst < (n > 0 ? n - 1 : 0)) ++linkFirst;
+            if (b.hashPressed()) fleet_->link().probeNow();
+            if (b.starPressed()) toRoot();
+            break;
+        }
+        case Mode::EDIT_TIMERS: updateEditTimers(b, now); break;
+        case Mode::EDIT_NAME: updateEditName(b, now); break;
+        case Mode::BATTERY_CALIB: updateCalibration(b, now); break;
+        case Mode::EDIT_RSSI_CALIB: updateRssiCalib(b, now); break;
+        case Mode::CHANNEL: updateChannel(b, now); break;
+        case Mode::FIND_TIMERS:
+            if (b.hashPressed()) fleet_->findLostTimers();
+            if (b.starPressed()) toRoot();
+            break;
+        case Mode::LINK_TEST:
+            if (b.hashPressed() && !fleet_->link().linkTesting()) fleet_->startLinkTest(40, 40);
+            if (b.starPressed()) toRoot();
+            break;
+        case Mode::CONFIRM:
+            if (b.hashPressed()) {
+                if (confirmAction == ConfirmAction::RESET_TIMER) fleet_->factoryResetActive();
+                else if (confirmAction == ConfirmAction::RESET_REMOTE) remoteResetPending_ = true;
+                else if (confirmAction == ConfirmAction::REBOOT) rebootPending_ = true;
+                exitMenu();
+            } else if (b.starPressed()) {
+                toRoot();
+            }
+            break;
     }
-    if (channelSelection >= (int)channelOptions.size()) {
-        channelSelection = (int)channelOptions.size() - 1;
+    if (scrollAnim && now - scrollAnimStart >= SCROLL_ANIM_MS) scrollAnim = false;
+}
+
+void MenuSystem::activate(int index, uint32_t now) {
+    switch (index) {
+        case I_PAIR:
+            mode = Mode::PAIRING;
+            pairSel = 0;
+            fleet_->startDiscovery(true);
+            break;
+        case I_RENAME: enterRename(); break;
+        case I_ACTIVE: enterSelectActive(false); break;
+        case I_EDIT_TIMERS: enterEditTimers(); break;
+        case I_LINK_STATUS: mode = Mode::LINK_STATUS; linkFirst = 0; fleet_->link().probeNow(); break;
+        case I_FIND: mode = Mode::FIND_TIMERS; fleet_->findLostTimers(); break;
+        case I_CHANNEL: mode = Mode::CHANNEL; startChannelScan(now); break;
+        case I_LINK_TEST:
+            if (!fleet_->getActiveDevice()) { fleet_->showToast("No timer selected", now); break; }
+            mode = Mode::LINK_TEST;
+            fleet_->startLinkTest(40, 40);
+            break;
+        case I_AUTO_OFF: mode = Mode::EDIT_AUTO_OFF; break;
+        case I_BRIGHTNESS: mode = Mode::EDIT_BRIGHTNESS; editBrightness = settings_->get().oledBrightness; break;
+        case I_TX_POWER: mode = Mode::EDIT_TXPOWER; editTxPowerQdbm = settings_->get().txPowerQdbm; break;
+        case I_RSSI_CAL:
+            mode = Mode::EDIT_RSSI_CALIB;
+            rssiField = 0;
+            editRssiLow = settings_->get().rssiLowDbm;
+            editRssiHigh = settings_->get().rssiHighDbm;
+            break;
+        case I_BAT_CAL:
+            mode = Mode::BATTERY_CALIB;
+            calibStarted = false;
+            calField = 0;
+            for (int i = 0; i < 3; ++i) editCal[i] = settings_->get().batCalMv[i];
+            break;
+        case I_RESET_TIMER:
+            if (!fleet_->getActiveDevice()) { fleet_->showToast("No timer selected", now); break; }
+            mode = Mode::CONFIRM; confirmAction = ConfirmAction::RESET_TIMER; break;
+        case I_RESET_REMOTE: mode = Mode::CONFIRM; confirmAction = ConfirmAction::RESET_REMOTE; break;
+        case I_REBOOT: mode = Mode::CONFIRM; confirmAction = ConfirmAction::REBOOT; break;
+        case I_SLEEP: sleepPending_ = true; exitMenu(); break;
     }
 }
 
-void MenuSystem::setChannelScanFailed() {
-    channelOptions.clear();
-    channelScanActive = false;
-    channelScanFailed = true;
+void MenuSystem::updateRoot(const ButtonInput& b, uint32_t now) {
+    auto move = [&](int dir) {
+        prevSelected = selected;
+        const int oldScroll = scrollOffset;
+        selected = (selected + dir + kItemCount) % kItemCount;
+        clampScroll();
+        lastSelChange = now;
+        animScroll = scrollOffset;
+        if (scrollOffset != oldScroll) { scrollAnim = true; scrollAnimStart = now; scrollDir = dir; prevScroll = oldScroll; }
+    };
+    if (b.upPressed()) move(-1);
+    if (b.downPressed()) move(+1);
+    if (b.hashPressed()) { activate(selected, now); swallowHash_ = true; ignoreHash_ = true; }
+    else if (b.starPressed()) exitMenu();
+}
+
+void MenuSystem::updateSimpleEdit(const ButtonInput& b, uint32_t now) {
+    const int step = holdSteps(b, now, hold_);
+    RemoteSettingsData& s = settings_->mut();
+    if (mode == Mode::EDIT_AUTO_OFF) {
+        if (step > 0 && autoOffIdx < 6) ++autoOffIdx;
+        if (step < 0 && autoOffIdx > 0) --autoOffIdx;
+        if (b.hashPressed()) { s.autoOffSeconds = kAutoOffOptions[autoOffIdx]; settings_->save(); settingsApplied_ = true; toRoot(); }
+        else if (b.starPressed()) {
+            autoOffIdx = 3;
+            for (int i = 0; i < 7; ++i) if (kAutoOffOptions[i] == s.autoOffSeconds) autoOffIdx = i;
+            toRoot();
+        }
+    } else if (mode == Mode::EDIT_TXPOWER) {
+        editTxPowerQdbm = (int8_t)constrain(editTxPowerQdbm + step, 8, 84);
+        if (b.hashPressed()) { s.txPowerQdbm = editTxPowerQdbm; settings_->save(); settingsApplied_ = true; toRoot(); }
+        else if (b.starPressed()) toRoot();
+    } else {   // brightness: live preview is applied by the display while editing
+        editBrightness = (uint8_t)constrain((int)editBrightness + step * 5, 5, 255);
+        if (b.hashPressed()) { s.oledBrightness = editBrightness; settings_->save(); settingsApplied_ = true; toRoot(); }
+        else if (b.starPressed()) { editBrightness = s.oledBrightness; toRoot(); }
+    }
+}
+
+void MenuSystem::updatePairing(const ButtonInput& b) {
+    const int n = fleet_->getDiscoveredCount();
+    if (n > 0) {
+        if (b.upPressed()) pairSel = (pairSel + n - 1) % n;
+        if (b.downPressed()) pairSel = (pairSel + 1) % n;
+        if (pairSel >= n) pairSel = n - 1;
+    }
+    if (b.hashPressed() && n > 0) {
+        const DiscoveredDevice d = fleet_->getDiscovered(pairSel);
+        const int idx = fleet_->findPairedIndexByMac(d.mac);
+        if (idx >= 0) fleet_->removeDeviceByIndex(idx);
+        else fleet_->pairWithIndex(pairSel);
+    }
+    if (b.starPressed()) { fleet_->stopDiscovery(); toRoot(); }
+}
+
+void MenuSystem::updateEditTimers(const ButtonInput& b, uint32_t now) {
+    auto tweak = [&](int& tenths, int digit, int delta) {
+        int pow10 = 1;
+        for (int i = 0; i < Defaults::DIGITS - digit - 1; ++i) pow10 *= 10;
+        int d = (tenths / pow10) % 10;
+        d = (d + delta) % 10;
+        if (d < 0) d += 10;
+        tenths = tenths - ((tenths / pow10) % 10) * pow10 + d * pow10;
+    };
+    const int step = holdSteps(b, now, hold_);
+    if (step != 0) {
+        if (editDigitIndex < Defaults::DIGITS) tweak(editToffTenths, editDigitIndex, step);
+        else tweak(editTonTenths, editDigitIndex - Defaults::DIGITS, step);
+    }
+    if (hashLong(b)) { editDigitIndex = editDigitIndex > 0 ? editDigitIndex - 1 : 2 * Defaults::DIGITS - 1; return; }
+    if (hashClick(b)) {
+        ++editDigitIndex;
+        if (editDigitIndex >= 2 * Defaults::DIGITS) {
+            const int toff = constrain(editToffTenths, (int)Defaults::SLAVE_TIMER_MIN_TENTHS, (int)Defaults::SLAVE_TIMER_MAX_TENTHS);
+            const int ton = constrain(editTonTenths, (int)Defaults::SLAVE_TIMER_MIN_TENTHS, (int)Defaults::SLAVE_TIMER_MAX_TENTHS);
+            fleet_->setActiveTimer(ton / 10.0f, toff / 10.0f);
+            exitMenu();
+        }
+    }
+    if (b.starPressed()) exitMenu();
+}
+
+void MenuSystem::updateEditName(const ButtonInput& b, uint32_t now) {
+    const int len = (int)sizeof(nameBuf) - 1;
+    const int step = holdSteps(b, now, hold_);
+    if (step != 0) {
+        char& c = nameBuf[namePos];
+        const char* p = strchr(kCharset, c);
+        int idx = p ? (int)(p - kCharset) : 0;
+        const int n = (int)sizeof(kCharset) - 1;
+        idx = (idx + step + n) % n;
+        c = kCharset[idx];
+    }
+    if (hashLong(b)) { namePos = namePos > 0 ? namePos - 1 : len - 1; return; }
+    if (hashClick(b)) {
+        if (namePos < len - 1) { ++namePos; return; }
+        // last cell: save (trim trailing blanks)
+        char out[Fog::kNameLen];
+        strncpy(out, nameBuf, sizeof(out));
+        out[sizeof(out) - 1] = 0;
+        for (int i = (int)strlen(out) - 1; i >= 0 && out[i] == ' '; --i) out[i] = 0;
+        if (out[0]) fleet_->setActiveName(out);
+        exitMenu();
+        return;
+    }
+    if (b.starPressed()) exitMenu();
+}
+
+void MenuSystem::updateCalibration(const ButtonInput& b, uint32_t now) {
+    if (!calibStarted) {
+        if (b.hashPressed()) { calibStarted = true; calField = 0; }
+        else if (b.starPressed()) toRoot();
+        return;
+    }
+    const int step = holdSteps(b, now, hold_);
+    if (step != 0) editCal[calField] = (uint16_t)constrain((int)editCal[calField] + step * 10, 2500, 4500);
+    if (hashLong(b)) { editCal[calField] = battery_->readMillivoltsNow(); return; }     // capture the live reading
+    if (hashClick(b)) {
+        if (calField < 2) { ++calField; return; }
+        if (editCal[0] < editCal[1] && editCal[1] < editCal[2]) {
+            for (int i = 0; i < 3; ++i) settings_->mut().batCalMv[i] = editCal[i];
+            settings_->save();
+            toRoot();
+        } else {
+            fleet_->showToast("Must ascend 0<50<100", now);
+            calField = 0;
+        }
+    }
+    if (b.starPressed()) toRoot();
+}
+
+void MenuSystem::updateRssiCalib(const ButtonInput& b, uint32_t now) {
+    const int step = holdSteps(b, now, hold_);
+    if (step != 0) {
+        if (rssiField == 0) editRssiLow = (int8_t)constrain(editRssiLow + step, -120, -10);
+        else editRssiHigh = (int8_t)constrain(editRssiHigh + step, -110, 0);
+        if (editRssiHigh < editRssiLow + 5) { if (rssiField == 0) editRssiLow = (int8_t)(editRssiHigh - 5); else editRssiHigh = (int8_t)(editRssiLow + 5); }
+    }
+    if (b.hashPressed()) {
+        if (rssiField == 0) rssiField = 1;
+        else {
+            settings_->mut().rssiLowDbm = editRssiLow;
+            settings_->mut().rssiHighDbm = editRssiHigh;
+            settings_->save();
+            toRoot();
+        }
+    } else if (b.starPressed()) toRoot();
+}
+
+void MenuSystem::startChannelScan(uint32_t now) {
+    chCount = 0;
+    chSel = 0;
+    if (fleet_->startSurvey()) chStage = ChannelStage::Scanning;
+    else { chStage = ChannelStage::Failed; }
+    (void)now;
+}
+
+void MenuSystem::updateChannel(const ButtonInput& b, uint32_t now) {
+    ChannelSurvey& sv = fleet_->survey();
+    switch (chStage) {
+        case ChannelStage::Scanning:
+            if (sv.state() == ChannelSurvey::State::Done) {
+                chCount = sv.bestCount();
+                for (int i = 0; i < chCount; ++i) chOrder[i] = sv.best(i);
+                chSel = 0;
+                chStage = ChannelStage::Choose;
+            } else if (sv.state() == ChannelSurvey::State::Failed || (!sv.active() && sv.state() == ChannelSurvey::State::Idle)) {
+                chStage = ChannelStage::Failed;
+            }
+            if (b.starPressed()) { sv.cancel(); fleet_->radio().setChannel(fleet_->homeChannel()); toRoot(); }
+            break;
+        case ChannelStage::Choose:
+            if (b.upPressed() && chSel > 0) --chSel;
+            if (b.downPressed() && chSel < chCount - 1) ++chSel;
+            if (hashLong(b)) startChannelScan(now);
+            else if (hashClick(b)) {
+                chTarget = chOrder[chSel];
+                if (chTarget == fleet_->homeChannel()) { fleet_->showToast("Already on that channel", now); toRoot(); }
+                else if (fleet_->migrateTo(chTarget, false)) chStage = ChannelStage::Moving;
+                else fleet_->showToast("Busy, try again", now);
+            }
+            if (b.starPressed()) toRoot();
+            break;
+        case ChannelStage::Moving:
+            if (fleet_->migrateResult() >= 0) chStage = ChannelStage::Result;
+            break;
+        case ChannelStage::Result:
+            if (fleet_->migrateResult() == 0 && b.hashPressed()) {          // nobody answered: offer to force it
+                if (fleet_->migrateTo(chTarget, true)) chStage = ChannelStage::Moving;
+            } else if (b.starPressed() || (fleet_->migrateResult() == 1 && b.hashPressed())) {
+                fleet_->clearMigrateResult();
+                toRoot();
+            }
+            break;
+        case ChannelStage::Failed:
+            if (b.hashPressed()) startChannelScan(now);
+            else if (b.starPressed()) toRoot();
+            break;
+    }
 }

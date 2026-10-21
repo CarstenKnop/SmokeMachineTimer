@@ -1,0 +1,349 @@
+# Fog Console — User Manual
+
+*The Windows tool for the FogMachine remote system · works as a second remote, a configurator and a link debugger*
+
+![Dashboard](../PCDiagnostics/docs/dashboard-dark.png)
+
+## Contents
+
+1. [What it does](#1-what-it-does)
+2. [Install and start](#2-install-and-start)
+3. [The first screen: connect or try the demo](#3-the-first-screen-connect-or-try-the-demo)
+4. [The window](#4-the-window)
+5. [Dashboard](#5-dashboard)
+6. [Device](#6-device)
+7. [Pairing](#7-pairing)
+8. [Channels and Link Lab](#8-channels-and-link-lab)
+9. [Diagnostics](#9-diagnostics)
+10. [Console](#10-console)
+11. [Settings](#11-settings)
+12. [Offline demo (simulator)](#12-offline-demo-simulator)
+13. [A timer connected directly](#13-a-timer-connected-directly)
+14. [Safety features](#14-safety-features)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Command line, files and shortcuts](#16-command-line-files-and-shortcuts)
+
+> **Terminology:** “fog machine” (fogger) and “smoke machine” are both common. “Fog” is the US trade name, “smoke machine” the UK/Danish everyday term. Neither makes real smoke. I use “smoke machine” for the machine and “fog” for the burst.
+
+---
+
+## 1. What it does
+
+Fog Console talks to the **remote** over its USB cable (protocol: [`SERIAL_PROTOCOL.md`](SERIAL_PROTOCOL.md)). Through the
+remote's radio it can do everything the remote's buttons do — for **all ten timers at once** — and more:
+
+* **Remote control:** hold-to-fog, toggle, reset, pause and resume, change ON/OFF times (single timer or all), stagger the
+  machines so they do not all fire together.
+* **Configuration:** rename, start phase after a power cut, pair and unpair, remote settings (TX power, brightness, Auto Off, signal
+  bars, battery calibration).
+* **Radio tools:** channel survey, moving the whole system to a quiet channel, finding timers that were away, link tests.
+* **Debugging:** the performance counters of the remote and of every timer, health hints, history graphs, a packet inspector, the
+  device log and a raw command line.
+* **Offline demo:** a built-in simulator with up to ten virtual timers, so you can learn the tool without any hardware.
+
+The remote stays awake while the PC is connected. When the PC goes away the remote's normal Auto Off behaviour applies again.
+
+---
+
+## 2. Install and start
+
+Requirements: Windows 10/11 and the **.NET 10 SDK** (`dotnet --version` should say 10.x). From the repository folder:
+
+```powershell
+dotnet build PCDiagnostics\FogConsole.sln -c Release
+dotnet run --project PCDiagnostics\FogConsole\FogConsole.csproj               # normal start
+dotnet run --project PCDiagnostics\FogConsole\FogConsole.csproj -- --sim      # start straight into the offline demo
+```
+
+The program ends up in `PCDiagnostics\FogConsole\bin\Release\net10.0-windows\FogConsole.exe` — make a shortcut to it if you like.
+
+**The window always starts maximized.** Un-maximize it and it returns to the size and position you last used. The layout adapts
+from a 1000 px wide window up to 4K: dashboard cards reflow into as many columns as fit.
+
+The theme follows Windows (light or dark) and can be changed in [Settings](#11-settings). Every page looks like this in both themes:
+
+![Dashboard, light theme](../PCDiagnostics/docs/dashboard-light.png)
+
+---
+
+## 3. The first screen: connect or try the demo
+
+![Welcome screen](../PCDiagnostics/docs/start-dark.png)
+
+* **Connect to remote** — plug the remote in with a USB data cable. The ESP32 device is recognised and pre-selected in the port
+  list at the top left (press **F5** or the refresh button if the list is empty). Press **Connect**.
+  If the remote is asleep or unplugged the tool simply waits and connects by itself when the port appears; it also reconnects
+  after the remote restarts (reboot, factory reset, channel change).
+* **Try offline demo** — starts the simulator (see [§12](#12-offline-demo-simulator)). Nothing is connected to real machines.
+
+---
+
+## 4. The window
+
+* **Top bar** — port list, **Connect/Disconnect**, **Simulator**, and on the right the connection chip (state and latency) and
+  the remote chip (battery %, USB/charging, channel).
+* **Navigation rail** (left) — Dashboard, Device, Pairing, Channels, Diagnostics, Console, Settings.
+* **Banners** — a **red banner** whenever any timer is *forced on*; a **violet SIMULATED banner** (and a tinted window) in demo mode.
+* **Status bar** (bottom) — the latest command result or error, lines per second on the cable, count of unparsable lines,
+  protocol version and the remote's firmware version.
+* **Toasts** — failures appear in the bottom right corner until you close them, e.g. *“Fog2 did not answer — it may be powered off
+  while heating”*.
+
+![A failed command](../PCDiagnostics/docs/fail-dark.png)
+
+---
+
+## 5. Dashboard
+
+One **card per timer**, ten at most. Everything on a card updates live (the ring is smoothed between the remote's updates).
+
+| Part of a card | Meaning |
+|----------------|---------|
+| Coloured dot + name | The timer. The dot is its colour tag. The name is a **nickname that exists only on this PC** — click the pencil (or double-click the name) to change it. To rename the timer itself use the [Device page](#6-device) |
+| `AUTO` / `FORCE ON` / `PAUSED` | Mode of the timer |
+| `boot 4` | The timer's power-up counter. It rises each time the timer lost power |
+| **Ring and big number** | Seconds left in the current phase; the ring shows the progress |
+| `ON` / `OFF` pill, “until OFF/ON” | Current phase of the cycle (output on or off) |
+| `ON 1,5 s · OFF 10,0 s` | The configured durations |
+| `REBOOTED` badge | The timer was power-cycled; shown for 30 s |
+| **OFFLINE**, “last seen 37 s ago” | No message from the timer for 4.5 s — normal while its machine heats up. The card is greyed out and its buttons are disabled |
+| Signal strip | Bars and dBm at the remote, packet loss, a verdict (*good / fair / poor link*) and a small history graph |
+
+**Buttons on a card**
+
+* **Hold to fog** — *press and hold*: the output is forced on, as long as you keep holding (see [Safety](#14-safety-features)).
+* **Toggle** — flip the phase now (OFF → ON or ON → OFF); the phase timer restarts.
+* **Reset** — output off and the cycle starts again from the beginning of its OFF phase.
+* **Pause / Resume** — freeze the cycle with the output off / continue where it stopped.
+* **Identify** — blink the timer's status LED for 5 s (needs the optional LED on the timer).
+* **Click the card** to select it (the remote's active timer follows), **double-click** to open the [Device page](#6-device).
+
+**Bulk bar (“ALL TIMERS”)** — acts on every timer: **Pause**, **Resume**, **Reset**, **Toggle**, **Apply times to all…** (sets the same ON/OFF
+times everywhere) and **Stagger start**, which spreads the phases evenly over the OFF time so that the machines do not all fire at the
+same moment. The result of a bulk action is summarised, e.g. *“7/8 confirmed, Fog3 timed out”*.
+
+![Hold to fog](../PCDiagnostics/docs/dashboard-dark.png)
+
+*In this picture Fog7 is being forced on: its card is red and the banner at the top says so. Fog4 is offline (its machine is heating), Fog2 shows the REBOOTED badge, Fog8 is paused.*
+
+---
+
+## 6. Device
+
+Double-click a card (or choose the timer in the drop-down at the top right) to see everything about one timer.
+
+![Device page](../PCDiagnostics/docs/device-dark.png)
+
+* **Live** — countdown, mode, durations, boot counter, uptime; **Hold to fog**, Toggle, Reset, Pause.
+* **Durations** — type or drag **ON** and **OFF** in steps of 0.1 s (valid 0.1 – 9999.9 s), pick a **preset** (`1 / 10 s`…) or *Save current
+  values as preset*, then **Apply to timer**. The result (confirmed, rejected, timed out; attempts and time) is shown in *Recent commands*.
+* **Cycle – last 60 seconds** — a timeline of ON, OFF, forced, paused and offline periods, with cycle length, duty cycle and fog per minute.
+* **Radio link – last 5 minutes** — signal at the remote and at the timer, and packet loss over time.
+* **Configuration**
+  * **Name on the timer** — renames the timer itself (1–9 characters; it is stored in the timer and in the remote's list).
+  * **Start phase after power-up** — which phase the timer starts in after a power cut. OFF is the safe default; choose ON if the machine
+    should fire first.
+  * **Radio channel of this timer** — for bench work only; to change the channel of the whole system use [Channels](#8-channels-and-link-lab).
+  * **Identify**, **Reboot…**, **Factory reset…** — each asks for confirmation.
+
+---
+
+## 7. Pairing
+
+![Pairing](../PCDiagnostics/docs/pairing-dark.png)
+
+1. Power up the timer(s) near the remote.
+2. Press **Discover**. While discovery runs, every timer in range is listed, paired or not.
+3. Tick **Also sweep other channels** to find timers that were left on another channel (this can take half a minute).
+   Such a timer is marked **other channel**; pairing it also brings it onto your channel.
+4. Type a name next to a *new* timer and press **Pair**. **Unpair** removes a paired timer from the remote.
+
+Discovery stops by itself when you leave the page. Up to ten timers can be paired.
+
+---
+
+## 8. Channels and Link Lab
+
+![Channels](../PCDiagnostics/docs/channels-dark.png)
+
+**Survey** — press **Survey channels**. The radio pauses for about 3 s while the remote measures the 2.4 GHz band. Each column is a
+channel; the number is its **score (0 = quiet … 100 = busy)**; below it you see how many Wi-Fi networks use it and the strongest one.
+`CURRENT` marks the channel in use and `★ #1 #2 #3` the recommendations. Wi-Fi channels overlap their neighbours, so a channel next to a
+busy one scores worse than its own traffic suggests.
+
+**Move the whole system** — click a column, press **Move system to channel N** and confirm. The remote tells every online timer, waits until
+they confirmed, and then follows. Progress per timer is shown as it happens:
+
+![Moving the system](../PCDiagnostics/docs/migrate-dark.png)
+
+*Force: move even if no timer confirms* changes the channel even when no timer answered (for example when all machines are off).
+Without it the change is cancelled, so you cannot lose contact with your timers by accident.
+
+**Lost timers** — a timer that was off while the system moved comes back on the *old* channel and stays offline. **Find lost timers** makes the
+remote look on every channel and bring such timers home. (The remote also does this by itself in the background, rarely and briefly.)
+
+**Link Lab** — choose a timer, the number of packets and the gap, then **Run test**: the remote pings the timer and reports how many were
+answered, how many the radio acknowledged, the round-trip time and the signal. Earlier tests stay in the list so that you can compare
+channels, positions or distances.
+
+![Link lab](../PCDiagnostics/docs/linklab-dark.png)
+
+---
+
+## 9. Diagnostics
+
+![Diagnostics](../PCDiagnostics/docs/diagnostics-dark.png)
+
+Every device **counts what happens on its radio**. This page shows both ends of every link. The counters are requested once per second,
+but only while this page is open.
+
+**Remote panel** — *Radio* (sent, acknowledged, failed, received, bad, foreign, dropped, watchdog), *Commands and channel tools*
+(commands, timeouts, rejected, retries, round-trip times, sweeps, recoveries), *System* (uptime, boots, slowest loop, loops per second,
+heap), *Resets* since the device was first started (power-on, brown-out, watchdog, panic, software, deep sleep) and the *USB connection to this PC*.
+Under each number you see its rate per second.
+
+**One panel per timer** — a header with chips (*online*, *rebooted ×2*, *brownout 1* …), three small graphs for the last five minutes
+(**loss %**, **signal**, **TX fail rate**), the link **as the remote sees it** (loss, lost/expected frames, MAC failures, RSSI min/avg/max,
+offline time, reboots, commands, retries) and **the timer's own counters** (received, bad, dropped, sent, failed, duplicates, loop time,
+brown-outs, power-ons, heap, RSSI at the timer).
+
+**Health chips** call out what looks wrong; hover for the explanation:
+
+| Chip | Means |
+|------|-------|
+| `loss 25%` | A quarter of the timer's heartbeats do not arrive — interference or distance |
+| `macFail 13%` | The receiving radio did not acknowledge many unicast frames — weak link or wrong channel |
+| `weak -83 dBm` | Signal is poor |
+| `rx drop` | A device overloaded its receive queue (real packet loss inside the device) |
+| `slow loop` | The main loop stalled (> 20 ms) — report it |
+| `cmd timeout`, `offline ×1` | Commands that were not answered / how often the timer went away |
+| `rebooted ×2`, `brownout 1`, `watchdog`, `panic` | Power cuts and resets of the timer |
+
+![Lower part of the page](../PCDiagnostics/docs/diagnostics-low-dark.png)
+
+**Channel quality** — a table of transmissions, failures and receptions *per channel*, accumulated since you pressed **Reset**; compare channels
+over time. **Snapshot compare** — set a baseline, change something (channel, power, position), and see the difference. **Copy as JSON** and
+**Export CSV…** save the numbers for a report.
+
+---
+
+## 10. Console
+
+Three tabs show everything the device says.
+
+* **Log** — the device's log with a level filter (the *Device level* box tells the device how much to send), text filter, **Pause**, **Copy**,
+  **Save…**, **Clear** and Auto-scroll.
+* **Packets** — every radio frame the remote sees or sends (direction, time, address, type, length, signal, sequence, hex), with filter,
+  pause and export. Tick the capture option to start it (it is limited to 30 frames per second).
+* **Raw** — every line on the USB cable in both directions, including plain text such as boot messages, and a box where you can send
+  your own JSON line (see [`SERIAL_PROTOCOL.md`](SERIAL_PROTOCOL.md)); the history is kept.
+
+![Packets](../PCDiagnostics/docs/packets-dark.png)
+
+![Raw](../PCDiagnostics/docs/raw-dark.png)
+
+---
+
+## 11. Settings
+
+![Settings](../PCDiagnostics/docs/settings-dark.png)
+
+**Remote** (stored in the remote; **Reload** reads them again, **Save to remote** writes them):
+
+| Setting | Meaning |
+|---------|---------|
+| Radio transmit power | 2 – 21 dBm (default 20 dBm = 100 mW, the EU limit) |
+| Display brightness | OLED contrast |
+| Auto-off | Seconds until the display blanks and the remote sleeps (0 = never). The remote stays awake while the PC is connected |
+| Signal bars | Signal strength that shows as 0 and as 6 bars on the remote |
+| Battery calibration | Battery millivolts that count as 0 %, 50 % and 100 %. *Use live voltage* takes the current reading |
+| Network id | Read-only (always 1) |
+
+**This application** — theme (System / Light / Dark), how many log/raw lines and packets are kept, what the offline demo pretends to be (applies the next time the simulator starts) and an *About* box with the connected device's information. Reconnecting after the remote re-appears happens automatically.
+
+---
+
+## 12. Offline demo (simulator)
+
+The demo is a complete, **virtual remote with up to ten virtual timers**; it speaks the very same protocol as the real thing. Start it from the
+welcome screen (**Try offline demo**), from the top bar (**Simulator**) or with `--sim`. A violet **SIMULATED** chip, a banner and a tinted
+window make sure nobody mistakes it for real machines.
+
+Open **Demo controls** in the top bar:
+
+![Demo controls](../PCDiagnostics/docs/simpanel-dark.png)
+
+* **Timers** (1–10), **Random seed** (same seed = same story) and **Restart simulator with these settings**.
+* **Packet loss** — add artificial loss to every link.
+* **Cut power (30 s)** to a chosen timer — it goes offline, comes back with the REBOOTED badge and a brown-out in the counters.
+* **Inject interference on the current channel (60 s)** — a jammer appears: run a survey, move to a quiet channel and watch the link recover.
+* **Pause time** — freeze the simulation to examine a situation.
+
+Everything works offline: pairing, survey and channel moves, link tests, counters, console and settings. Heating machines (timers that lose power
+for a while) are part of the default scenario.
+
+---
+
+## 13. A timer connected directly
+
+Plug a **timer** (not the remote) into the PC and connect: the tool recognises it and treats it as a fleet of one. Fleet functions (pairing, channel
+survey…) are hidden; you can configure the timer (name, ON/OFF times, start phase), control it, watch its log and see its own counters under
+Diagnostics. This is the easiest way to prepare a timer on the bench before it goes on a machine.
+
+---
+
+## 14. Safety features
+
+* **Hold to fog is momentary.** The output is forced on only while you hold the button (or the space bar while the button has the focus). The tool
+  refreshes the command every 0.3 s; letting go, switching to another window, losing focus or losing the connection releases it. And even if the PC
+  crashes, the timer's own **1-second lease** runs out and the output returns to its cycle.
+* A **red banner** across the top shows whenever any timer reports *force on*.
+* **Destructive actions ask first:** factory reset, reboot, unpair, moving a timer or the whole system to another channel, resetting all timers.
+* **Every command shows its real result:** confirmed (with attempts and time), rejected, or timed out with a plain explanation. A rejected command
+  right after a power cut is normal: the rebooted timer refuses commands that were meant for its previous start (it must never fire by surprise) —
+  just press again.
+* The radio link is not encrypted; see the [user manual](MANUAL.md#2-safety).
+
+---
+
+## 15. Troubleshooting
+
+| Symptom | Cause / what to do |
+|---------|--------------------|
+| “No serial port found” | Use a **data** USB cable, wake the remote (press UP or DOWN), press **F5**. A remote in deep sleep has no COM port |
+| Connects, then “connection lost” repeatedly | Another program (a serial monitor, PlatformIO) has the port; close it. The remote restarts when it is reset by another tool |
+| Dashboard is empty after connecting | No timers paired yet → [Pairing](#7-pairing) |
+| A timer is **OFFLINE** | Its machine is heating, or it is out of range or on another channel → wait, then **Find lost timers**; check [Diagnostics](#9-diagnostics) |
+| “did not answer — it may be powered off while heating” | The command could not be delivered within 2.5 s; repeat when the timer is back |
+| “rejected” right after a power cut | See [Safety features](#14-safety-features): just press again |
+| The status bar shows `bad JSON: N` | Some line on the cable could not be understood (for example garbage after a reset); harmless if the number does not keep growing |
+| Channel move “cancelled” | No timer answered. Power the machines on or tick **Force** |
+| The window opens on the wrong monitor | Un-maximize, move it, maximize again — the restored position is remembered |
+
+If something looks wrong, **Console → Raw** shows the exact lines exchanged, and **Diagnostics → Copy as JSON** captures the counters.
+
+---
+
+## 16. Command line, files and shortcuts
+
+```
+FogConsole.exe [--sim] [--sim-timer] [--seed N] [--paired N]
+               [--page Dashboard|Device|Pairing|Channels|Diagnostics|Console|Settings] [--select N]
+               [--theme light|dark|system] [--size WxH] [--no-chaos] [--no-demo] [--no-settings]
+               [--shot out.png [--shot-scale 1]] [--delay secs] [--exit] [--action name] [--scroll px]
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--sim` / `--sim-timer` | Start the simulated remote (with timers) / a single simulated timer on USB |
+| `--seed N`, `--paired N` | Simulator random seed (default 42) and number of paired virtual timers |
+| `--page`, `--select N`, `--theme` | Page, device index and theme for this run |
+| `--no-chaos`, `--no-demo` | No random power cuts / no scripted start scenario — reproducible pictures |
+| `--shot file.png`, `--delay s`, `--exit` | Save a screenshot after *delay* seconds and quit (this is how the pictures in this manual were made; see `PCDiagnostics\docs\make-screenshots.ps1`) |
+
+**Keyboard:** `Ctrl+1` … `Ctrl+7` switch pages (Dashboard … Settings), `F5` rescans the COM ports.
+
+**Files:** settings are stored in `%AppData%\FogConsole\settings.json` (last port, window size, nicknames and colours, theme); unexpected errors are
+written to `%AppData%\FogConsole\crash.log`.
+
+More details for developers: [`PCDiagnostics/README.md`](../PCDiagnostics/README.md) and [`PROTOCOL_NOTES.md`](../PCDiagnostics/PROTOCOL_NOTES.md).

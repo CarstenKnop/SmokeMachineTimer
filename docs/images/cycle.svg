@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .t{font-size:15px;fill:#1c2630;font-weight:600}
+      .s{font-size:13px;fill:#44525f}
+      .ax{stroke:#8a97a3;stroke-width:1.5}
+      .on{fill:#d9822b}
+      .force{fill:#c62828}
+      .lab{font-size:12px;fill:#1c2630}
+    </style>
+  </defs>
+  <rect width="960" height="420" fill="#ffffff"/>
+  <text x="20" y="28" font-size="19" font-weight="700" fill="#1c2630">What a timer does with its output</text>
+
+  <!-- row 1: normal cycle -->
+  <text class="t" x="20" y="64">Automatic cycle</text>
+  <line class="ax" x1="20" y1="120" x2="940" y2="120"/>
+  <polyline fill="none" stroke="#d9822b" stroke-width="3" points="20,120 150,120 150,82 190,82 190,120 340,120 340,82 380,82 380,120 530,120 530,82 570,82 570,120 720,120 720,82 760,82 760,120 940,120"/>
+  <text class="s" x="70" y="140" text-anchor="middle">OFF 10.0 s</text>
+  <text class="s" x="170" y="74" text-anchor="middle">ON 1.0 s</text>
+  <text class="s" x="265" y="140" text-anchor="middle">OFF</text>
+  <text class="s" x="360" y="74" text-anchor="middle">ON</text>
+  <text class="s" x="455" y="140" text-anchor="middle">OFF</text>
+  <text class="s" x="550" y="74" text-anchor="middle">ON</text>
+  <text class="s" x="840" y="140" text-anchor="middle">repeats forever…</text>
+
+  <!-- row 2: hold to fog -->
+  <text class="t" x="20" y="186">Hold  *  on the remote</text>
+  <line class="ax" x1="20" y1="240" x2="940" y2="240"/>
+  <polyline fill="none" stroke="#c62828" stroke-width="3" points="20,240 250,240 250,202 520,202 520,240 940,240"/>
+  <text class="s" x="385" y="194" text-anchor="middle">output ON while * is held (refreshed 3×/s)</text>
+  <text class="s" x="135" y="260" text-anchor="middle">cycle paused</text>
+  <text class="s" x="730" y="260" text-anchor="middle">fresh OFF phase, then the cycle continues</text>
+  <rect x="250" y="268" width="270" height="14" fill="#fdecea" stroke="#c62828"/>
+  <text class="lab" x="385" y="279" text-anchor="middle">button held</text>
+  <text class="s" x="545" y="226" text-anchor="start">remote asleep / link lost → output back to auto in ~1 s</text>
+
+  <!-- row 3: power cut -->
+  <text class="t" x="20" y="312">Power cut while the machine heats up</text>
+  <line class="ax" x1="20" y1="370" x2="940" y2="370"/>
+  <polyline fill="none" stroke="#d9822b" stroke-width="3" points="20,370 120,370 120,332 160,332 160,370 250,370"/>
+  <rect x="250" y="326" width="330" height="54" fill="#eef1f4" stroke="#8a97a3" stroke-dasharray="5 4"/>
+  <text class="s" x="415" y="350" text-anchor="middle">no power – machine heating (minutes)</text>
+  <text class="s" x="415" y="368" text-anchor="middle">remote shows OFFLINE, never queues commands</text>
+  <polyline fill="none" stroke="#d9822b" stroke-width="3" points="580,370 760,370 760,332 800,332 800,370 940,370"/>
+  <text class="s" x="670" y="390" text-anchor="middle">timer boots in ~0.3 s, announces itself</text>
+  <text class="s" x="670" y="406" text-anchor="middle">(boot counter +1 → “power-cycled”), starts a fresh OFF phase</text>
+</svg>

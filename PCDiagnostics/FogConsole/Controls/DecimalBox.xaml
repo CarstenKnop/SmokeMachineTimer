@@ -1,0 +1,27 @@
+<UserControl x:Class="FogConsole.Controls.DecimalBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root" Focusable="False" MinWidth="130">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBox x:Name="Box" Grid.Column="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Right"
+                 FontFamily="Cascadia Mono, Consolas" FontSize="15" Padding="8,6,26,6"
+                 GotKeyboardFocus="Box_GotKeyboardFocus" LostKeyboardFocus="Box_LostKeyboardFocus"
+                 PreviewKeyDown="Box_PreviewKeyDown"
+                 AutomationProperties.Name="{Binding (AutomationProperties.Name), ElementName=Root}"
+                 ToolTip="{Binding ToolTip, ElementName=Root}"/>
+        <TextBlock x:Name="SuffixText" Grid.Column="0" Text="{Binding Suffix, ElementName=Root}" HorizontalAlignment="Right"
+                   VerticalAlignment="Center" Margin="0,0,10,0" IsHitTestVisible="False"
+                   Foreground="{DynamicResource Fog.TextFaint}" FontSize="12"/>
+        <RepeatButton Grid.Column="1" Margin="4,0,0,0" Width="34" Content="&#xE738;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                      Click="Minus_Click" Delay="350" Interval="60" Focusable="False" ToolTip="Decrease (Down arrow)"
+                      AutomationProperties.Name="Decrease"/>
+        <RepeatButton Grid.Column="2" Margin="4,0,0,0" Width="34" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                      Click="Plus_Click" Delay="350" Interval="60" Focusable="False" ToolTip="Increase (Up arrow)"
+                      AutomationProperties.Name="Increase"/>
+    </Grid>
+</UserControl>

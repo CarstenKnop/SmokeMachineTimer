@@ -1,108 +1,55 @@
-// ---------------------------------------------------------------------------
-// Defaults.h (Remote Control)
-// ---------------------------------------------------------------------------
-// Central non‑persisted constants for the FogMachineRemoteControl firmware.
-// Mirrors (and intentionally duplicates) the core defaults so this project can
-// be built standalone by PlatformIO without needing to reference the parent
-// core directory include paths. If you change a value in the core defaults,
-// replicate it here (or refactor later to a shared include path).
-// ---------------------------------------------------------------------------
+// Defaults.h - compile-time constants of the remote (UI timing, layout, hardware polarity).
+// Persistent user settings live in config/RemoteSettings.h.
 #pragma once
-// Ensure Arduino fixed-width types (uint8_t, etc.) are available
+
 #include <Arduino.h>
 #include <stdint.h>
+#include "FogProto.h"
+#define FOG_FW_STRING_REMOTE FOG_FW_STRING
 
 namespace Defaults {
-  // Preferred ESP-NOW channel when no user selection is stored.
-  static constexpr uint8_t DEFAULT_CHANNEL = 1;
+  // Display
+  static constexpr uint8_t OLED_ROTATION = 0;                 // 0..3 = 0/90/180/270 degrees
+  static constexpr int DIGITS = 5;                            // timer digits XXXX.X
 
-  // Display rotation: 0,1,2,3 => 0/90/180/270 degrees
-  static constexpr uint8_t OLED_ROTATION = 0;
+  // Timer bounds enforced by the editor (tenths of a second): 0.1 s .. 9999.9 s
+  static constexpr unsigned long SLAVE_TIMER_MIN_TENTHS = Fog::kMinTenths;
+  static constexpr unsigned long SLAVE_TIMER_MAX_TENTHS = Fog::kMaxTenths;
 
-  // Hardware Pins (ESP32-C3 Seeed XIAO)
-  static constexpr int RELAY_PIN = 2;      // (May be unused on remote, kept for parity)
-  static constexpr int BTN_UP = 3;
-  static constexpr int BTN_DOWN = 4;
-  static constexpr int BTN_HASH = 9;       // '#'
-  static constexpr int BTN_STAR = 10;      // '*'
-  static constexpr int OLED_SDA = 6;       // Primary I2C SDA (alt pair handled elsewhere if needed)
-  static constexpr int OLED_SCL = 7;       // Primary I2C SCL
+  // A timer is "stale" on the display when its last report is older than this.
+  static constexpr unsigned long RSSI_STALE_MS = Fog::kOnlineWindowMs;
 
-  static constexpr int DIGITS = 5;                    // 5 digits (XXXX.X)
+  // Buttons / menu timing
+  static constexpr unsigned long BUTTON_DEBOUNCE_MS = 25;
+  static constexpr unsigned long BUTTON_LONG_PRESS_MS = 800;  // '#': long press opens the menu
+  static constexpr unsigned long MENU_PROGRESS_START_MS = 500;
+  static constexpr unsigned long MENU_PROGRESS_FULL_MS  = 3000;
+  static constexpr unsigned long EDIT_INITIAL_DELAY_MS   = 400;
+  static constexpr unsigned long EDIT_REPEAT_INTERVAL_MS = 120;
+  static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 350;   // '*' click vs hold (hold = fog while held)
+  static constexpr unsigned long STAR_DEEP_SLEEP_HOLD_MS = 3000; // '*' very long hold = sleep now
+  static constexpr unsigned long MENU_RESULT_TIMEOUT_MS = 5000;
+  static constexpr unsigned long FORCE_LEASE_MS = 1000;          // dead-man lease of a held '*'
+  static constexpr unsigned long FORCE_REFRESH_MS = 300;
 
-  // Bounds for the timer device (slave) as enforced by its Config/Defaults
-  // FogMachineTimer/src/Defaults.h: TIMER_MIN=10 (1.0s), TIMER_MAX=60000 (6000.0s)
-  // Use these to cap values in the remote's timer editor so we never send out-of-range values.
-  static constexpr unsigned long SLAVE_TIMER_MIN_TENTHS = 1;      // 0.1s minimum (requested)
-  static constexpr unsigned long SLAVE_TIMER_MAX_TENTHS = 99999;  // 9999.9s maximum (2.77h)
-  // RSSI staleness window (ms)
-  static constexpr unsigned long RSSI_STALE_MS = 3000;
-
-  // Menu / UI timing
-  // Time user must hold '#' to trigger menu entry (long-press)
-  static constexpr unsigned long BUTTON_LONG_PRESS_MS = 800;
-  // Grace period before showing hold progress bar (prevents flicker for short taps)
-  static constexpr unsigned long MENU_HOLD_GRACE_MS = 250;
-  static constexpr unsigned long MENU_PROGRESS_START_MS = 500;   // show hold progress after 0.5s
-  static constexpr unsigned long MENU_PROGRESS_FULL_MS  = 3000;  // reach full bar at 3s
-  static constexpr float MENU_SCROLL_SPEED = 5.0f;               // rows per second velocity
-
-  // Editing repeat timings
-  static constexpr unsigned long EDIT_INITIAL_DELAY_MS   = 400;  // first repeat after hold
-  static constexpr unsigned long EDIT_REPEAT_INTERVAL_MS = 120;  // subsequent repeat cadence
-  static constexpr unsigned long EDIT_BLINK_INTERVAL_MS  = 350;  // cursor blink
-  static constexpr unsigned long MENU_FULL_BLINK_INTERVAL_MS = 400; // full-screen blink feedback
-  // Star button behavior: threshold to distinguish click vs hold (ms)
-  // STAR: threshold to distinguish click vs hold (ms)
-  // Choose a value that avoids accidental holds but still feels responsive
-  static constexpr unsigned long STAR_HOLD_THRESHOLD_MS = 350;
-  static constexpr unsigned long STAR_DEEP_SLEEP_HOLD_MS = 3000;
-
-  // Post-action result/info timeout
-  static constexpr unsigned long MENU_RESULT_TIMEOUT_MS = 5000;  // 5s message lifetime
-
-  // General loop pacing (soft delay per loop if needed)
-  static constexpr unsigned long LOOP_DELAY_MS = 1;
-
-  // COMM LED: minimum on-time for visibility (ms)
-  static constexpr unsigned long COMM_LED_MIN_ON_MS = 2; // make this longer (e.g., 120) if still not visible
-  // COMM LED polarity (true = active HIGH, false = active LOW)
+  // COMM LED (external, on D3)
+  static constexpr unsigned long COMM_LED_MIN_ON_MS = 8;
   static constexpr bool COMM_LED_ACTIVE_HIGH = true;
-  // ESP-NOW command retry policy (0 retries => infinite until ACK/NAK)
-  static constexpr unsigned long COMM_RETRY_INTERVAL_MS = 200;
-  static constexpr uint8_t COMM_MAX_RETRIES = 0;
 
-  // UI layout (remote)
-  // Timer rows and digits
-  static constexpr int UI_TIMER_START_X   = 26;  // left offset for timer digits
-  static constexpr int UI_TIMER_ROW_Y_OFF = 0;   // OFF row Y
-  static constexpr int UI_TIMER_ROW_Y_ON  = 24;  // ON row Y
-  static constexpr int UI_TIMER_ROW_Y_TIME= 48;  // TIME row Y
-  static constexpr int UI_DIGIT_WIDTH     = 11;  // pixel width per digit in text size 2
-  static constexpr int UI_LABEL_GAP_X     = 10;  // gap after digits before label
-  // State indicator position (the bottom '*')
-  static constexpr int UI_STATE_CHAR_Y    = 48;  // keep at bottom-left; may overlap TIME label minimally
-  // Battery icon position and size (top-left)
-  static constexpr int UI_BATT_X          = 0;
-  static constexpr int UI_BATT_Y          = 0;
-  static constexpr int UI_BATT_W          = 16;  // body width (excludes terminal)
-  static constexpr int UI_BATT_H          = 8;   // body height
-  static constexpr int UI_BATT_TERM_W     = 2;   // terminal width
-  static constexpr int UI_BATT_TERM_H     = 4;   // terminal height
-  // Progress bar geometry
-  static constexpr int UI_PBAR_X          = 0;
-  static constexpr int UI_PBAR_Y          = 48;
-  static constexpr int UI_PBAR_W          = 128;
-  static constexpr int UI_PBAR_H          = 16;
+  // Layout of the main screen
+  static constexpr int UI_TIMER_START_X   = 26;
+  static constexpr int UI_TIMER_ROW_Y_OFF = 0;
+  static constexpr int UI_TIMER_ROW_Y_ON  = 24;
+  static constexpr int UI_TIMER_ROW_Y_TIME= 48;
+  static constexpr int UI_DIGIT_WIDTH     = 11;
+  static constexpr int UI_LABEL_GAP_X     = 10;
+  static constexpr int UI_STATE_CHAR_Y    = 48;
+  static constexpr int UI_BATT_X = 0, UI_BATT_Y = 0, UI_BATT_W = 16, UI_BATT_H = 8, UI_BATT_TERM_W = 2, UI_BATT_TERM_H = 4;
+  static constexpr int UI_PBAR_X = 0, UI_PBAR_Y = 48, UI_PBAR_W = 128, UI_PBAR_H = 16;
 
-  // Charger status pin polarity
-  // Many charger ICs expose CHG (charging) as active-LOW and PWR (power good) as active-HIGH.
-  // Adjust here if your hardware differs.
-  static constexpr bool CHARGER_CHG_ACTIVE_HIGH = true;  // true  => HIGH means charging (set per hardware)
-  static constexpr bool CHARGER_PWR_ACTIVE_HIGH = true;  // true  => HIGH means powered
+  // Charger status pins (see Pins.h)
+  static constexpr bool CHARGER_CHG_ACTIVE_HIGH = true;
+  static constexpr bool CHARGER_PWR_ACTIVE_HIGH = true;
 
-
-  // Version tag (may be overridden later per project release scheme)
-  inline const char* VERSION() { return "FogMachineTimer v1.0"; }
+  inline const char* VERSION() { return "FogRemote v" FOG_FW_STRING_REMOTE; }
 }
-

@@ -1,20 +1,25 @@
-// BatteryMonitor.h
-// Reads battery voltage via ADC and calculates percentage using calibration.
+// BatteryMonitor.h - LiPo voltage through the 2x200k divider on A0, plus charger status pins.
 #pragma once
+
 #include <Arduino.h>
-#include "calibration/CalibrationManager.h"
+#include "config/RemoteSettings.h"
 
 class BatteryMonitor {
 public:
-    BatteryMonitor(uint8_t adcPin, CalibrationManager& calibMgr);
+    BatteryMonitor(uint8_t adcPin, RemoteSettings& settings) : pin_(adcPin), settings_(settings) {}
+
     void begin();
-    uint16_t readRawAdc() const;
-    uint8_t getPercent() const;
-    float getVoltage();
+    // Takes a fresh oversampled reading about once per second; cheap to call every loop.
+    void update(uint32_t nowMs);
+    uint16_t millivolts() const { return mv_; }
+    uint8_t percent() const;
+    bool charging() const;
+    bool usbPower() const;
+    uint16_t readMillivoltsNow() const;      // immediate reading (calibration screen)
+
 private:
-    uint8_t pin;
-    CalibrationManager& calibration;
-    // Oversampling count (simple average of multiple ADC reads)
-    static constexpr uint8_t OVERSAMPLE = 16;
-    uint16_t sampleAveraged() const;
+    uint8_t pin_;
+    RemoteSettings& settings_;
+    uint16_t mv_ = 0;
+    uint32_t lastMs_ = 0;
 };

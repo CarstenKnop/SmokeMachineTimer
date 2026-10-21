@@ -1,43 +1,42 @@
-// DisplayManager.h
-// Handles OLED rendering, UI, and battery indicator.
+// DisplayManager.h - owns the SSD1306 OLED: init, blanking, contrast and efficient flushing.
+// What is drawn comes from ui/Screens.*; a frame is only sent to the display when its pixels changed,
+// which keeps the I2C bus (and the loop) quiet while a screen is static.
 #pragma once
+
 #include <Adafruit_SSD1306.h>
-#include "device/DeviceManager.h"
-#include "battery/BatteryMonitor.h"
-#include "menu/MenuSystem.h"
-#include "ui/ButtonInput.h"
+#include "menu/MenuState.h"
+#include "ui/UiModel.h"
 
 class DisplayManager {
 public:
-    DisplayManager();
-    void begin();
-    void render(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu, const ButtonInput& buttons);
-    bool isOk() const { return inited; }
-    bool isBlank() const { return isBlanked; }
-    void setSkipSplash(bool v) { skipSplash = v; }
-    bool hasError() const { return initFailed; }
-    // Minimal UI to show a firmware update countdown at boot
-    void drawUpdateCountdown(uint8_t secondsRemaining) const;
-    // Draw a one-line boot status at the bottom of the splash (y≈54)
-    void drawBootStatus(const char* msg) const;
-    void setPreventBlanking(bool value);
+    DisplayManager() : display_(128, 64, &Wire, -1) {}
+
+    bool begin();
+    // Draws the current screen. activity = a button is down / was pressed (wakes a blanked display).
+    void render(const UiModel& model, const MenuState& menu, uint8_t brightness, uint16_t autoOffSeconds, bool activity, bool keepAwake);
+    bool isOk() const { return inited_; }
+    bool isBlank() const { return blanked_; }
     void blankNow();
+    void wake();
+    void showBootStatus(const char* msg);
+    void showUpdateCountdown(uint8_t secondsRemaining);
+
+    // frame statistics for the diagnostics
+    uint32_t lastFlushUs() const { return lastFlushUs_; }
+    uint32_t maxFlushUs() const { return maxFlushUs_; }
+    uint32_t frames() const { return frames_; }
+    uint32_t skipped() const { return skipped_; }
+
 private:
-    mutable Adafruit_SSD1306 display;
-    bool inited = false;
-    bool initFailed = false;
-    bool skipSplash = false;
-    // Blanking state
-    mutable bool isBlanked = false;
-    mutable unsigned long lastWakeMs = 0;
-    bool preventBlanking = false;
-    int selectedSda = -1;
-    int selectedScl = -1;
-    void splash();
-    void drawErrorScreen() const;
-    void drawBatteryIndicator(uint8_t percent) const;
-    void drawMenu(const MenuSystem& menu, const DeviceManager& deviceMgr, const BatteryMonitor& battery) const;
-    void drawMainScreen(const DeviceManager& deviceMgr, const BatteryMonitor& battery, const MenuSystem& menu) const;
-    void drawProgressBar(unsigned long holdMs, unsigned long longPressMs) const;
-    void drawTimerRow(int tenths, int y, const char* label, int startX = 10) const;
+    void setContrast(uint8_t level);
+    void flushIfChanged(bool force);
+
+    Adafruit_SSD1306 display_;
+    bool inited_ = false;
+    bool blanked_ = false;
+    uint32_t lastWakeMs_ = 0;
+    uint8_t contrast_ = 0;
+    uint32_t lastHash_ = 0;
+    bool haveHash_ = false;
+    uint32_t lastFlushUs_ = 0, maxFlushUs_ = 0, frames_ = 0, skipped_ = 0;
 };

@@ -1,0 +1,22 @@
+# FogMachineRemoteControl
+
+Firmware of the handheld remote (Seeed XIAO ESP32-C3, SSD1306 OLED 128×64, four buttons UP / DOWN / # / \*, LiPo battery).
+It controls up to ten timers, sleeps when idle and bridges the PC tool over USB.
+
+```powershell
+pio run -d FogMachineRemoteControl             # build
+pio run -d FogMachineRemoteControl -t upload   # flash
+powershell -File tools/oled-preview/run.ps1    # render all screens to docs/images/oled (needs one build first)
+```
+
+| Folder | Role |
+|--------|------|
+| `src/main.cpp` | boot, main loop, input handling, deep sleep |
+| `src/link/` | `Fleet` (radio pump + `Fog::RemoteLink` + paired list), `ChannelSurvey` |
+| `src/pc/PcBridge.*` | USB JSON protocol ([`docs/SERIAL_PROTOCOL.md`](../docs/SERIAL_PROTOCOL.md)) |
+| `src/menu/` | `MenuState` (pure data) and `MenuSystem` (navigation, editors, actions) |
+| `src/ui/` | `Screens.*` (every screen as a pure function of `UiModel` — also rendered on the PC for the manual), `DisplayManager` (hardware), `ButtonInput` (time-based debounce) |
+| `src/config/`, `src/battery/` | NVS settings, battery voltage/percent |
+| `../lib/FogLink/` | protocol, radio, storage, USB link (shared with the timer) |
+
+Controls and screens are explained with pictures in the [user manual](../docs/MANUAL.md).

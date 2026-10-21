@@ -1,0 +1,10 @@
+# build output and IDE state of the PC tool
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# test and screenshot scratch files
+TestResults/
+*.crash.log

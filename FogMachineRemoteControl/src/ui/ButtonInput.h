@@ -1,6 +1,6 @@
-// ButtonInput.h
-// Handles button polling and debouncing.
+// ButtonInput.h - four active-low buttons with time-based debouncing and one-shot events.
 #pragma once
+
 #include <Arduino.h>
 #include "Defaults.h"
 
@@ -9,46 +9,44 @@ public:
     ButtonInput(uint8_t upGpio, uint8_t downGpio, uint8_t hashGpio, uint8_t starGpio);
     void begin();
     void update();
-    bool upPressed() const { return edgeFlags[0]; }
-    bool downPressed() const { return edgeFlags[1]; }
-    bool leftPressed() const { return edgeFlags[2]; }   // legacy name for hash
-    bool rightPressed() const { return edgeFlags[3]; }  // legacy name for star
-    bool hashPressed() const { return edgeFlags[2]; }
-    bool starPressed() const { return edgeFlags[3]; }
-    bool hashLongPressed() const { return hashLongPressActive; }
-    bool hashHeld() const { return states[2]; }
-    bool upHeld() const { return states[0]; }
-    bool downHeld() const { return states[1]; }
-    bool starHeld() const { return states[3]; }
-    unsigned long hashHoldDuration() const { return states[2] ? (millis() - hashPressStart) : 0; }
-    unsigned long hashPressStartTime() const { return states[2] ? hashPressStart : 0; }
-    // STAR helpers (symmetry with HASH)
-    unsigned long starHoldDuration() const { return states[3] ? (millis() - starPressStart) : 0; }
-    unsigned long starPressStartTime() const { return states[3] ? starPressStart : 0; }
-    // Legacy right* methods retained but mapped to star for now (not used for menu)
-    bool rightLongPressed() const { return false; }
-    unsigned long rightHoldDuration() const { return 0; }
-    // Use Defaults for long-press threshold
+
+    // One-shot edges (true for exactly one update() cycle)
+    bool upPressed() const { return edge_[0]; }
+    bool downPressed() const { return edge_[1]; }
+    bool hashPressed() const { return edge_[2]; }
+    bool starPressed() const { return edge_[3]; }
+    bool hashLongEvent() const { return hashLongEvent_; }     // fires once when '#' has been held LONG_PRESS_MS
+    bool hashReleased() const { return releaseEdge_[2]; }
+    bool hashClick() const { return hashClick_; }             // '#' released after a SHORT press (no long-press event fired)
+    bool starReleased() const { return releaseEdge_[3]; }
+
+    // Levels
+    bool upHeld() const { return state_[0]; }
+    bool downHeld() const { return state_[1]; }
+    bool hashHeld() const { return state_[2]; }
+    bool starHeld() const { return state_[3]; }
+    bool anyHeld() const { return state_[0] || state_[1] || state_[2] || state_[3]; }
+
+    unsigned long hashHoldDuration() const { return state_[2] ? (millis() - pressStart_[2]) : 0; }
+    unsigned long starHoldDuration() const { return state_[3] ? (millis() - pressStart_[3]) : 0; }
+    unsigned long upHoldDuration() const { return state_[0] ? (millis() - pressStart_[0]) : 0; }
+
+    // True if the button was already down when begin() ran (e.g. the key that woke us from deep sleep).
+    bool wasDownAtBoot(int idx) const { return bootDown_[idx]; }
+
     static constexpr unsigned long LONG_PRESS_MS = Defaults::BUTTON_LONG_PRESS_MS;
-    void dumpImmediateDebug() const; // optional
-    // Counters
-    uint32_t getPressCountUp() const { return pressEdges[0]; }
-    uint32_t getPressCountDown() const { return pressEdges[1]; }
-    uint32_t getPressCountHash() const { return pressEdges[2]; }
-    uint32_t getPressCountStar() const { return pressEdges[3]; }
+
 private:
-    uint8_t pins[4];
-    bool states[4];      // debounced current
-    bool rawLevels[4];   // last raw read (active low)
-    bool edgeFlags[4];   // true exactly in the cycle after a press edge
-    uint32_t pressEdges[4];
-    unsigned long stateSince[4];
-    unsigned long hashPressStart = 0;
-    unsigned long hashReleaseTime = 0;
-    bool hashLongPressActive = false;
-    unsigned long starPressStart = 0;
-    unsigned long starReleaseTime = 0;
-public:
-    unsigned long hashLastReleaseTime() const { return hashReleaseTime; }
-    unsigned long starLastReleaseTime() const { return starReleaseTime; }
+    uint8_t pins_[4];
+    bool state_[4] = {false, false, false, false};        // debounced level (true = pressed)
+    bool raw_[4] = {false, false, false, false};
+    bool edge_[4] = {false, false, false, false};
+    bool releaseEdge_[4] = {false, false, false, false};
+    bool bootDown_[4] = {false, false, false, false};
+    bool swallow_[4] = {false, false, false, false};      // ignore this press until it is released
+    uint32_t rawSince_[4] = {0, 0, 0, 0};
+    uint32_t pressStart_[4] = {0, 0, 0, 0};
+    bool hashLongSent_ = false;
+    bool hashLongEvent_ = false;
+    bool hashClick_ = false;
 };

@@ -1,0 +1,10 @@
+{
+  "name": "FogLink",
+  "version": "2.0.0",
+  "description": "Robust ESP-NOW link + USB JSON protocol shared by FogMachineRemoteControl and FogMachineTimer",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    { "name": "ArduinoJson", "owner": "bblanchon", "version": "^7.4.2" }
+  ]
+}

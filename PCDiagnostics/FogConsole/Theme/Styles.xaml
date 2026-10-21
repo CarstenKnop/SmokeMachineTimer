@@ -1,0 +1,355 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:c="clr-namespace:FogConsole.Controls">
+
+    <!-- ===== fonts ===== -->
+    <FontFamily x:Key="Fog.IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+    <FontFamily x:Key="Fog.MonoFont">Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="Fog.UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+
+    <!-- ===== text ===== -->
+    <Style x:Key="Fog.Icon" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Fog.IconFont}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Text}"/>
+        <Setter Property="Focusable" Value="False"/>
+    </Style>
+
+    <Style x:Key="Fog.Label" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Text}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style x:Key="Fog.Display" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="FontSize" Value="28"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Title" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Subtitle" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="FontSize" Value="14.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Body" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="TextTrimming" Value="None"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="LineHeight" Value="20"/>
+    </Style>
+    <Style x:Key="Fog.Dim" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+    </Style>
+    <Style x:Key="Fog.DimBody" TargetType="TextBlock" BasedOn="{StaticResource Fog.Body}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+    </Style>
+    <Style x:Key="Fog.Caption" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style x:Key="Fog.Faint" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextFaint}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+    </Style>
+    <Style x:Key="Fog.Overline" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextFaint}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Mono" TargetType="TextBlock" BasedOn="{StaticResource Fog.Label}">
+        <Setter Property="FontFamily" Value="{StaticResource Fog.MonoFont}"/>
+    </Style>
+    <Style x:Key="Fog.MonoDim" TargetType="TextBlock" BasedOn="{StaticResource Fog.Mono}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style x:Key="Fog.Digits" TargetType="TextBlock" BasedOn="{StaticResource Fog.Mono}">
+        <Setter Property="FontSize" Value="30"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="TextTrimming" Value="None"/>
+    </Style>
+
+    <!-- ===== surfaces ===== -->
+    <Style x:Key="Fog.Card" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Fog.Surface}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="18"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+    <Style x:Key="Fog.Tile" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Fog.SurfaceAlt}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="10,7"/>
+    </Style>
+    <Style x:Key="Fog.Separator" TargetType="Rectangle">
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Fill" Value="{DynamicResource Fog.Border}"/>
+        <Setter Property="Margin" Value="0,12"/>
+    </Style>
+
+    <!-- chips (pills with text): Border + TextBlock -->
+    <Style x:Key="Fog.Chip" TargetType="Border">
+        <Setter Property="CornerRadius" Value="11"/>
+        <Setter Property="Padding" Value="9,3"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Background" Value="{DynamicResource Fog.SurfaceAlt}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Border}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="Fog.ChipText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="Fog.ChipIcon" TargetType="TextBlock" BasedOn="{StaticResource Fog.Icon}">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+        <Setter Property="Margin" Value="0,0,5,0"/>
+    </Style>
+
+    <Style x:Key="Fog.Chip.Ok" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.OkSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Ok}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Ok" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Ok}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Warn" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.WarnSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Warn}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Warn" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Warn}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Bad" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.BadSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Bad}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Bad" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Bad}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Info" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.InfoSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Info}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Info" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Info}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Accent" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.AccentSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Accent" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Accent}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Sim" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.SimSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Sim}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Sim" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Sim}"/>
+    </Style>
+    <Style x:Key="Fog.Chip.Solid.Bad" TargetType="Border" BasedOn="{StaticResource Fog.Chip}">
+        <Setter Property="Background" Value="{DynamicResource Fog.Danger}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Danger}"/>
+    </Style>
+    <Style x:Key="Fog.ChipText.Solid" TargetType="TextBlock" BasedOn="{StaticResource Fog.ChipText}">
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <!-- ===== buttons: fully templated so they do not depend on the Fluent resource order ===== -->
+    <ControlTemplate x:Key="Fog.ButtonTemplate" TargetType="ButtonBase">
+        <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource Fog.ButtonRadius}"
+                SnapsToDevicePixels="True">
+            <Border x:Name="Overlay" Background="Transparent" CornerRadius="{DynamicResource Fog.ButtonRadius}" Padding="{TemplateBinding Padding}">
+                <ContentPresenter x:Name="Content" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"
+                                  TextElement.Foreground="{TemplateBinding Foreground}">
+                    <ContentPresenter.Resources>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
+                        </Style>
+                    </ContentPresenter.Resources>
+                </ContentPresenter>
+            </Border>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Overlay" Property="Background" Value="{DynamicResource Fog.Hover}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Overlay" Property="Background" Value="{DynamicResource Fog.Hover}"/>
+                <Setter TargetName="Content" Property="Opacity" Value="0.8"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Root" Property="Opacity" Value="0.42"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <CornerRadius x:Key="Fog.ButtonRadius">8</CornerRadius>
+
+    <Style x:Key="Fog.Button" TargetType="Button">
+        <Setter Property="Template" Value="{StaticResource Fog.ButtonTemplate}"/>
+        <Setter Property="Background" Value="{DynamicResource Fog.SurfaceAlt}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.BorderStrong}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Text}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="14,7"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    </Style>
+    <Style x:Key="Fog.Button.Accent" TargetType="Button" BasedOn="{StaticResource Fog.Button}">
+        <Setter Property="Background" Value="{DynamicResource Fog.Accent}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.OnAccent}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Button.Danger" TargetType="Button" BasedOn="{StaticResource Fog.Button}">
+        <Setter Property="Background" Value="{DynamicResource Fog.Danger}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Danger}"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Fog.Button.Subtle" TargetType="Button" BasedOn="{StaticResource Fog.Button}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+    <Style x:Key="Fog.Button.Small" TargetType="Button" BasedOn="{StaticResource Fog.Button}">
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="FontSize" Value="12.5"/>
+    </Style>
+    <Style x:Key="Fog.Button.Hold" TargetType="Button" BasedOn="{StaticResource Fog.Button.Small}">
+        <Setter Property="Background" Value="{DynamicResource Fog.AccentSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Accent}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Style.Triggers>
+            <Trigger Property="c:HoldBehavior.IsHolding" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Fog.Danger}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Fog.Danger}"/>
+                <Setter Property="Foreground" Value="White"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="Fog.IconButton" TargetType="Button" BasedOn="{StaticResource Fog.Button.Subtle}">
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Width" Value="32"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="FontFamily" Value="{StaticResource Fog.IconFont}"/>
+        <Setter Property="FontSize" Value="15"/>
+    </Style>
+
+    <!-- toggle buttons (switch-like pill) -->
+    <Style x:Key="Fog.ToggleButton" TargetType="ToggleButton">
+        <Setter Property="Template" Value="{StaticResource Fog.ButtonTemplate}"/>
+        <Setter Property="Background" Value="{DynamicResource Fog.SurfaceAlt}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Fog.BorderStrong}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fog.Text}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Style.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Fog.AccentSoft}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Fog.Accent}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="Fog.ToggleButton.Sim" TargetType="ToggleButton" BasedOn="{StaticResource Fog.ToggleButton}">
+        <Style.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Fog.Sim}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Fog.Sim}"/>
+                <Setter Property="Foreground" Value="White"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- navigation rail item -->
+    <Style x:Key="Fog.NavItem" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource Fog.TextDim}"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="6,2"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="AutomationProperties.Name" Value="{Binding Title}"/>
+        <Setter Property="ToolTip" Value="{Binding Tooltip}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Bg" CornerRadius="10" Background="Transparent" BorderThickness="1" BorderBrush="Transparent"/>
+                        <Border x:Name="Pill" Width="3.5" Height="22" CornerRadius="2" Background="{DynamicResource Fog.Accent}"
+                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0" Opacity="0"/>
+                        <ContentPresenter Margin="2,10,2,8" HorizontalAlignment="Center"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Fog.Hover}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Fog.Selected}"/>
+                            <Setter TargetName="Pill" Property="Opacity" Value="1"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Fog.Text}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bg" Property="BorderBrush" Value="{DynamicResource Fog.Accent}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- a list item that only shows hover (no blue selection) -->
+    <Style x:Key="Fog.PlainListItem" TargetType="ListBoxItem">
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Fog.Hover}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- section headers inside pages -->
+    <Style x:Key="Fog.PageTitle" TargetType="TextBlock" BasedOn="{StaticResource Fog.Title}">
+        <Setter Property="Margin" Value="0,0,0,2"/>
+    </Style>
+    <Style x:Key="Fog.PageSubtitle" TargetType="TextBlock" BasedOn="{StaticResource Fog.DimBody}">
+        <Setter Property="Margin" Value="0,0,0,14"/>
+        <Setter Property="MaxWidth" Value="860"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+    </Style>
+
+</ResourceDictionary>

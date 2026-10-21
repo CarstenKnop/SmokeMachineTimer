@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>FogConsole</RootNamespace>
+    <AssemblyName>FogConsole</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- WPF0001: ThemeMode (Fluent theme) is marked experimental in .NET 9/10. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <Version>2.0.0</Version>
+    <Product>Fog Console</Product>
+    <Description>PC tool for the Smoke Machine Timer system (FogSerial/2)</Description>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.13" />
+    <PackageReference Include="System.Management" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FogConsole.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -2,62 +2,61 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "PIO: Build (python -m platformio)",
-			"type": "shell",
-			"command": "python",
-			"args": [
-				"-m",
-				"platformio",
-				"run",
-				"-d",
-				"${workspaceFolder}\\FogMachineRemoteControl"
-			],
-			"problemMatcher": [
-				"$platformio"
-			],
-			"group": "build"
-		},
-		{
-			"label": "PIO: Build (pio in PATH)",
+			"label": "Build remote firmware",
 			"type": "shell",
 			"command": "pio",
-			"args": [
-				"run",
-				"-d",
-				"${workspaceFolder}\\FogMachineRemoteControl"
-			],
-			"problemMatcher": [
-				"$platformio"
-			],
+			"args": ["run", "-d", "${workspaceFolder}/FogMachineRemoteControl"],
+			"problemMatcher": ["$platformio"],
 			"group": "build"
 		},
 		{
-			"label": "PIO: Build (PlatformIO Core venv)",
-			"type": "shell",
-			"command": "${env:USERPROFILE}\\.platformio\\penv\\Scripts\\platformio.exe",
-			"args": [
-				"run",
-				"-d",
-				"${workspaceFolder}\\FogMachineRemoteControl"
-			],
-			"problemMatcher": [
-				"$platformio"
-			],
-			"group": "build"
-		},
-		{
-			"label": "Build FogMachineRemoteControl (PIO)",
+			"label": "Build timer firmware",
 			"type": "shell",
 			"command": "pio",
-			"args": [
-				"run",
-				"-d",
-				"${workspaceFolder}\\FogMachineRemoteControl"
-			],
-			"problemMatcher": [
-				"$platformio"
-			],
+			"args": ["run", "-d", "${workspaceFolder}/FogMachineTimer"],
+			"problemMatcher": ["$platformio"],
 			"group": "build"
+		},
+		{
+			"label": "Upload remote firmware",
+			"type": "shell",
+			"command": "pio",
+			"args": ["run", "-t", "upload", "-d", "${workspaceFolder}/FogMachineRemoteControl"],
+			"problemMatcher": ["$platformio"]
+		},
+		{
+			"label": "Upload timer firmware",
+			"type": "shell",
+			"command": "pio",
+			"args": ["run", "-t", "upload", "-d", "${workspaceFolder}/FogMachineTimer"],
+			"problemMatcher": ["$platformio"]
+		},
+		{
+			"label": "Protocol tests (host, MSVC)",
+			"type": "shell",
+			"command": "powershell",
+			"args": ["-NoProfile", "-File", "${workspaceFolder}/tools/native-tests/run.ps1"],
+			"group": "test"
+		},
+		{
+			"label": "Render OLED screens to PNG",
+			"type": "shell",
+			"command": "powershell",
+			"args": ["-NoProfile", "-File", "${workspaceFolder}/tools/oled-preview/run.ps1"]
+		},
+		{
+			"label": "Build Fog Console (PC tool)",
+			"type": "shell",
+			"command": "dotnet",
+			"args": ["build", "${workspaceFolder}/PCDiagnostics/FogConsole.sln"],
+			"problemMatcher": ["$msCompile"]
+		},
+		{
+			"label": "Run Fog Console (offline demo)",
+			"type": "shell",
+			"command": "dotnet",
+			"args": ["run", "--project", "${workspaceFolder}/PCDiagnostics/FogConsole/FogConsole.csproj", "--", "--sim"],
+			"problemMatcher": ["$msCompile"]
 		}
 	]
 }

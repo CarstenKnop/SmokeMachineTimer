@@ -18,6 +18,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
         _options = StartupOptions.Parse(e.Args);
+        Controls.TouchScroll.Install();                   // finger scrolling for every scroll area
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>

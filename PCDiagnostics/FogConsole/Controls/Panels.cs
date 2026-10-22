@@ -104,6 +104,10 @@ public static class HoldBehavior
         el.LostMouseCapture -= OnLostCapture;
         el.PreviewKeyDown -= OnKeyDown;
         el.PreviewKeyUp -= OnKeyUp;
+        el.PreviewTouchDown -= OnTouchDown;
+        el.PreviewTouchUp -= OnTouchUp;
+        el.PreviewTouchMove -= OnTouchMove;
+        el.LostTouchCapture -= OnLostTouchCapture;
         el.LostKeyboardFocus -= OnLostFocus;
         el.IsEnabledChanged -= OnEnabledChanged;
         if (GetStartCommand(d) is null && GetEndCommand(d) is null) return;
@@ -112,6 +116,10 @@ public static class HoldBehavior
         el.LostMouseCapture += OnLostCapture;
         el.PreviewKeyDown += OnKeyDown;
         el.PreviewKeyUp += OnKeyUp;
+        el.PreviewTouchDown += OnTouchDown;
+        el.PreviewTouchUp += OnTouchUp;
+        el.PreviewTouchMove += OnTouchMove;
+        el.LostTouchCapture += OnLostTouchCapture;
         el.LostKeyboardFocus += OnLostFocus;
         el.IsEnabledChanged += OnEnabledChanged;
     }
@@ -151,6 +159,48 @@ public static class HoldBehavior
     }
 
     private static void OnLostCapture(object sender, MouseEventArgs e) => End((UIElement)sender);
+
+    // A finger: the button is held while the finger stays on it. The touch is taken for the button, so it does not become a scroll drag of the page
+    // (and the press is not delayed until the finger lifts, which is what a scrolling page would do with it).
+    private static void OnTouchDown(object? sender, TouchEventArgs e)
+    {
+        var el = (UIElement)sender!;
+        if (!el.IsEnabled || !el.CaptureTouch(e.TouchDevice)) return;
+        el.SetValue(TouchStartProperty, WindowPoint(el, e));
+        Begin(el);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// A finger that starts a scroll on a hold button must not keep the machine fogging for the whole drag: moving more than
+    /// <see cref="TouchDragLimit"/> device-independent pixels away from where it touched ends the hold (the finger stays captured, so the
+    /// page does not scroll either; lift and touch again to hold).
+    /// </summary>
+    private static void OnTouchMove(object? sender, TouchEventArgs e)
+    {
+        var el = (UIElement)sender!;
+        if (!GetIsHolding(el) || el.GetValue(TouchStartProperty) is not Point start) return;
+        var p = WindowPoint(el, e);
+        if ((p - start).Length > TouchDragLimit) End(el);
+    }
+
+    public const double TouchDragLimit = 18;
+
+    // Measured in window coordinates: when the hold starts, the FORCE ON banner pushes the whole page down, so the button itself moves under a finger that has not moved at all.
+    private static Point WindowPoint(UIElement el, TouchEventArgs e) =>
+        Window.GetWindow(el) is { } w ? e.GetTouchPoint(w).Position : e.GetTouchPoint(el).Position;
+
+    private static readonly DependencyProperty TouchStartProperty = DependencyProperty.RegisterAttached("TouchStart", typeof(Point?), typeof(HoldBehavior), new PropertyMetadata(null));
+
+    private static void OnTouchUp(object? sender, TouchEventArgs e)
+    {
+        var el = (UIElement)sender!;
+        End(el);
+        el.ReleaseTouchCapture(e.TouchDevice);
+        e.Handled = true;
+    }
+
+    private static void OnLostTouchCapture(object? sender, TouchEventArgs e) => End((UIElement)sender!);
 
     private static void OnKeyDown(object sender, KeyEventArgs e)
     {

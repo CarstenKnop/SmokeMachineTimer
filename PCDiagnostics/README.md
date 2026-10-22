@@ -167,6 +167,12 @@ PCDiagnostics/
   docs/                        screenshots + make-screenshots.ps1
 ```
 
+**Touch.** Every `ScrollViewer` gets finger panning when the first finger lands (`Controls/TouchScroll.cs`; WPF leaves `PanningMode` at `None`),
+and the hold-to-fog buttons take the touch for themselves (`HoldBehavior` in `Controls/Panels.cs`: held while the finger rests on the button,
+released when it lifts, is lost or slides more than 18 DIP away). `tools/touch-test.ps1` checks all of this with real injected touch input
+(`InjectTouchInput`) on the running app: a drag on every page, a drag back, the slider thumb, and a hold with release and slide-off. It needs
+a Windows desktop session that nobody touches while it runs: `pwsh -NoProfile -File tools/touch-test.ps1 [-Test all|pages|slider|hold]`.
+
 The over-the-air tests include a **peer test**: `OtaPeerCompatibilityTests` drives `tools/native-tests/build/ota_peer.exe` - the timer's real receiver
 code (`lib/FogLink/FogOta.cpp`) as a program - with the C# sender, so both languages are proven to speak the same protocol. The test is skipped
 silently when the program has not been built (`powershell -File tools/native-tests/run.ps1` builds it).

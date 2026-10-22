@@ -92,6 +92,9 @@ The theme follows Windows (light or dark) and can be changed in [Settings](#12-s
   protocol version and the remote's firmware version.
 * **Toasts** — failures appear in the bottom right corner until you close them, e.g. *“Fog2 did not answer — it may be powered off
   while heating”*.
+* **Touch screen** — drag a finger up or down on a page to scroll it (with the usual swing-out when you let go), tap to click, drag the thumb
+  of a slider. **Hold to fog** works with a finger too: the output is on while the finger rests on the button and is released when you lift it
+  — or when the finger slides away from the button, so a drag that happens to start on it never keeps fogging.
 
 ![A failed command](../PCDiagnostics/docs/fail-dark.png)
 
@@ -422,7 +425,8 @@ A timer with over-the-air support can also take its update over this cable throu
 
 * **Hold to fog is momentary.** The output is forced on only while you hold the button (or the space bar while the button has the focus). The tool
   refreshes the command every 0.3 s; letting go, switching to another window, losing focus or losing the connection releases it. And even if the PC
-  crashes, the timer's own **1-second lease** runs out and the output returns to its cycle.
+  crashes, the timer's own **1-second lease** runs out and the output returns to its cycle. With a touch screen the same holds for a finger: lifting it,
+  sliding it off the button (more than about half a centimetre) or losing the touch releases the output.
 * A **red banner** across the top shows whenever any timer reports *force on*.
 * **Destructive actions ask first:** factory reset, reboot, unpair, moving a timer or the whole system to another channel, resetting all timers.
 * **Every command shows its real result:** confirmed (with attempts and time), rejected, or timed out with a plain explanation. A rejected command

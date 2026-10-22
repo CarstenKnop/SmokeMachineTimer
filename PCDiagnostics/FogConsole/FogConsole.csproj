@@ -10,6 +10,7 @@
     <RootNamespace>FogConsole</RootNamespace>
     <AssemblyName>FogConsole</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\FogConsole.ico</ApplicationIcon>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- WPF0001: ThemeMode (Fluent theme) is marked experimental in .NET 9/10. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
@@ -27,6 +28,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="FogConsole.Tests" />
+  </ItemGroup>
+
+  <!-- The application icon (tools\make-icon.ps1 draws it): also the icon of the windows. -->
+  <ItemGroup>
+    <Resource Include="Assets\FogConsole.ico" />
   </ItemGroup>
 
   <!-- Firmware images staged by tools\package-firmware.ps1 (firmware\timer and firmware\remote): shipped next to the exe for the Firmware page. -->

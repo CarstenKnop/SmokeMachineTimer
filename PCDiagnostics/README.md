@@ -160,11 +160,12 @@ PCDiagnostics/
     Diagnostics/               counter maths, health rules, channel quality, snapshot compare/export
     Services/                  settings, theme, toasts, command center, hold-to-fog, dialogs, screenshots, startup options
     ViewModels/  Views/  Controls/  Converters/  Theme/
+    Assets/FogConsole.ico      the application icon (drawn by tools/make-icon.ps1; preview: docs/app-icon.png)
   FogConsole.Tests/            xUnit: protocol, framing, hub, simulator, diagnostics, flashing (incl. the real esptool against the
                                simulated chip), over-the-air (spec test vectors, transfers over lossy / reordering / duplicating links
                                in virtual time, power cuts, wrong key, no slot, through the hub and the simulator, view model), view
                                models, end-to-end
-  docs/                        screenshots + make-screenshots.ps1
+  docs/                        screenshots, app-icon.png + make-screenshots.ps1
 ```
 
 **Touch.** Every `ScrollViewer` gets finger panning when the first finger lands (`Controls/TouchScroll.cs`; WPF leaves `PanningMode` at `None`),

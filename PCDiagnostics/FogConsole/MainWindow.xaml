@@ -4,6 +4,7 @@
         xmlns:vm="clr-namespace:FogConsole.ViewModels"
         xmlns:v="clr-namespace:FogConsole.Views"
         xmlns:cv="clr-namespace:FogConsole.Converters"
+        Icon="Assets/FogConsole.ico"
         Title="{Binding WindowTitle}" Width="1280" Height="800" MinWidth="1000" MinHeight="640"
         Background="{DynamicResource Fog.Background}" Foreground="{DynamicResource Fog.Text}"
         UseLayoutRounding="True" SnapsToDevicePixels="True"

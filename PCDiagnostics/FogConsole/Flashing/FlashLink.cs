@@ -111,10 +111,29 @@ public sealed class SerialFlashLink : IFlashLink
         closer.Wait(1500);
     }
 
+    /// <summary>A write that is not accepted within this time means nobody is reading on the other end.</summary>
+    private static readonly TimeSpan WriteLimit = TimeSpan.FromSeconds(5);
+
     public async Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
     {
-        await _port.BaseStream.WriteAsync(data, ct).ConfigureAwait(false);
-        await _port.BaseStream.FlushAsync(ct).ConfigureAwait(false);
+        // The serial stream does not look at the token while the driver holds the write (a USB device that never takes the data leaves it
+        // pending for good), so the wait is abandoned instead: on cancel at once, otherwise after WriteLimit. The pending write ends
+        // when the port is closed.
+        var port = _port;
+        try
+        {
+            await WriteCoreAsync(port, data).WaitAsync(WriteLimit, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new LinkStalledException($"{Name} does not accept data: nothing on the device reads from its USB port. Unplug the cable, plug it in again and retry.");
+        }
+    }
+
+    private static async Task WriteCoreAsync(SerialPort port, ReadOnlyMemory<byte> data)
+    {
+        await port.BaseStream.WriteAsync(data, CancellationToken.None).ConfigureAwait(false);
+        await port.BaseStream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     public async Task<int> ReadAsync(Memory<byte> buffer, TimeSpan timeout, CancellationToken ct)
@@ -127,12 +146,13 @@ public sealed class SerialFlashLink : IFlashLink
             var left = deadline - DateTime.UtcNow;
             if (left <= TimeSpan.Zero) return 0;
             int slice = (int)Math.Clamp(left.TotalMilliseconds, 1, 40);
+            var port = _port;
             int n = await Task.Run(() =>
             {
-                _port.ReadTimeout = slice;
-                try { return _port.Read(array, 0, array.Length); }
+                port.ReadTimeout = slice;
+                try { return port.Read(array, 0, array.Length); }
                 catch (TimeoutException) { return 0; }
-            }, CancellationToken.None).ConfigureAwait(false);
+            }, CancellationToken.None).WaitAsync(ct).ConfigureAwait(false);
             if (n > 0)
             {
                 array.AsMemory(0, n).CopyTo(buffer);

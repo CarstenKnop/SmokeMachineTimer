@@ -114,6 +114,9 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     /// <summary>How long the device is given to re-appear on USB before the PC tool reconnects (tests shorten it).</summary>
     public TimeSpan RestartWait { get; set; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>How long a run may take to react to Cancel before it is abandoned (tests shorten it).</summary>
+    public TimeSpan CancelGrace { get; set; } = TimeSpan.FromSeconds(3);
+
     /// <summary>The over-the-air route (timers through the remote).</summary>
     public OtaViewModel Ota { get; }
 
@@ -530,7 +533,8 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
     /// <summary>Hands the port over, runs the flasher on a worker thread and returns its outcome. Never throws.</summary>
     private async Task<FlashResult> ExecuteAsync(FlashPlan plan, FirmwareKind kind, PortInfo? port, bool simulated, bool closeHubFirst, bool checkOnly, CancellationToken ct)
     {
-        void Post(Action a) => _app.Ui.Post(a);
+        bool abandoned = false;                                       // set when a stuck run is given up: whatever it reports afterwards is dropped
+        void Post(Action a) { if (!abandoned) _app.Ui.Post(a); }
         void Log(string line) => Post(() => AppendLog(line));
         Stopwatch? writing = null;
         var progress = new CallbackProgress<FlashProgress>(p => Post(() =>
@@ -566,7 +570,12 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
             IFlashLink link;
             try
             {
-                link = simulated ? CreateSimulatedChip(kind) : await Task.Run(() => OpenLink(port!), CancellationToken.None).ConfigureAwait(true);
+                // opening a USB port can hang as well: Cancel must not wait for it
+                link = simulated ? CreateSimulatedChip(kind) : await Task.Run(() => OpenLink(port!), CancellationToken.None).WaitAsync(ct).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return new FlashResult { Cancelled = true, Message = "Cancelled." };
             }
             catch (UnauthorizedAccessException)
             {
@@ -580,7 +589,17 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
             try
             {
                 var options = new FlashOptions { Entry = ManualBoot ? BootEntry.AlreadyThere : BootEntry.Auto, WriteNothing = checkOnly };
-                return await Task.Run(() => FirmwareFlasher.RunAsync(link, plan, options, progress, Log, ct), CancellationToken.None).ConfigureAwait(true);
+                var run = Task.Run(() => FirmwareFlasher.RunAsync(link, plan, options, progress, Log, ct), CancellationToken.None);
+                if (await FinishedOrAbandonedAsync(run, ct).ConfigureAwait(true)) return await run.ConfigureAwait(true);
+
+                // The run did not react to Cancel (a call stuck in the driver): stop waiting for it. Closing the port below ends whatever it is stuck in.
+                abandoned = true;
+                _ = run.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                return new FlashResult
+                {
+                    Cancelled = true,
+                    Message = "Cancelled. The device did not react to the stop request, so the port was closed. If it keeps not answering, unplug the cable and plug it in again.",
+                };
             }
             finally
             {
@@ -592,6 +611,27 @@ public sealed partial class FirmwareViewModel : ObservableObject, IPageViewModel
             CrashLog.Write("Firmware update", ex);
             return new FlashResult { Message = $"Unexpected problem: {ex.Message}" };
         }
+    }
+
+    /// <summary>
+    /// Waits for <paramref name="run"/>. True when it finished (also when it ended by itself after Cancel); false when Cancel was pressed and the
+    /// run still had not ended after <see cref="CancelGrace"/> - a call stuck in the serial driver does not look at the token.
+    /// </summary>
+    private async Task<bool> FinishedOrAbandonedAsync(Task run, CancellationToken ct)
+    {
+        using var stop = new CancellationTokenSource();
+        var cancelled = new TaskCompletionSource();
+        using var registration = ct.Register(() => cancelled.TrySetResult());
+        var giveUp = Task.Run(async () =>
+        {
+            await cancelled.Task.WaitAsync(stop.Token).ConfigureAwait(false);
+            await Task.Delay(CancelGrace, stop.Token).ConfigureAwait(false);
+        }, CancellationToken.None);
+
+        var first = await Task.WhenAny(run, giveUp).ConfigureAwait(true);
+        stop.Cancel();
+        _ = giveUp.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        return first == run;
     }
 
     private async Task<string?> ReconnectAndReadVersionAsync(string portName)

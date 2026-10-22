@@ -50,6 +50,12 @@ public sealed class RomTimeoutException : Exception
     public RomTimeoutException(string message) : base(message) { }
 }
 
+/// <summary>The port does not take what is written to it: the device is attached but nothing on it reads (not a bootloader, not a running program).</summary>
+public sealed class LinkStalledException : IOException
+{
+    public LinkStalledException(string message) : base(message) { }
+}
+
 /// <summary>The chip never answered the sync request: it is not in the ROM bootloader.</summary>
 public sealed class BootloaderNotFoundException : Exception
 {
@@ -112,7 +118,9 @@ public sealed class RomLoader
         {
             // nothing to reset: just try to talk
             if (await TrySyncAsync(ct).ConfigureAwait(false)) return;
-            throw new BootloaderNotFoundException("The device does not answer. Put it into download mode by hand: hold the BOOT button, tap RESET, release BOOT.", StrayOrNull());
+            throw new BootloaderNotFoundException(
+                "The device does not answer. If you did not put it into download mode by hand, untick \"The device is already in download mode\" so that the tool resets it itself; " +
+                "otherwise hold the BOOT button, tap RESET, release BOOT.", StrayOrNull());
         }
 
         for (int attempt = 1; attempt <= attempts; attempt++)
@@ -130,7 +138,7 @@ public sealed class RomLoader
                     return;
                 }
             }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is not LinkStalledException && ex is IOException or InvalidOperationException or UnauthorizedAccessException)
             {
                 // the USB device went away with the reset and comes back as a new port handle: open it again and talk to the chip
                 _log?.Invoke("The USB device re-appeared after the reset; reopening the port.");

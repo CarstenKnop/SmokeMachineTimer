@@ -343,6 +343,103 @@ public class FirmwareViewModelTests : IDisposable
         Assert.Equal(ChipLevel.Warn, fw.ResultLevel);
     }
 
+    /// <summary>A port whose driver never completes a write and ignores the token - what a USB device that reads nothing does to the serial stream.</summary>
+    private sealed class StuckLink : IFlashLink
+    {
+        public volatile bool WriteStarted;
+        public volatile bool Disposed;
+        public string Name => "COM7";
+        public bool IsUsbJtagSerial => true;
+        public Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct) { WriteStarted = true; return new TaskCompletionSource().Task; }
+        public Task<int> ReadAsync(Memory<byte> buffer, TimeSpan timeout, CancellationToken ct) => Task.FromResult(0);
+        public void DiscardInput() { }
+        public Task<bool> TryReopenAsync(CancellationToken ct) => Task.FromResult(false);
+        public void SetLines(bool dtr, bool rts) { }
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
+    public async Task Cancel_ends_a_run_that_is_stuck_in_the_serial_driver()
+    {
+        var link = new StuckLink();
+        var (fw, _) = await RealPortSetupAsync(null, open: _ => link);
+        fw.CancelGrace = TimeSpan.FromMilliseconds(200);
+        fw.ManualBoot = true;                                   // "already in download mode": the first thing the tool does is write
+
+        var run = fw.FlashCommand.ExecuteAsync(null);
+        for (int i = 0; i < 300 && !link.WriteStarted; i++) await Task.Delay(10);
+        Assert.True(link.WriteStarted);
+        Assert.True(fw.IsBusy);
+
+        fw.CancelCommand.Execute(null);
+        Assert.Same(run, await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10))));
+        _app.Ui.Run();
+
+        Assert.Equal(FlashPhase.Cancelled, fw.Phase);
+        Assert.False(fw.IsBusy);
+        Assert.Contains("did not react", fw.ResultText);
+        Assert.True(link.Disposed);                              // the port is closed, which ends the stuck call in a real driver
+        Assert.Equal("reconnect COM7", _events.Last());          // and the PC tool gets its connection back
+    }
+
+    [Fact]
+    public async Task Cancel_ends_a_run_that_is_still_opening_the_port()
+    {
+        using var release = new ManualResetEventSlim();
+        var (fw, _) = await RealPortSetupAsync(null, open: _ => { release.Wait(TimeSpan.FromSeconds(20)); return new SimulatedRom(); });
+
+        var run = fw.FlashCommand.ExecuteAsync(null);
+        for (int i = 0; i < 300 && !fw.IsBusy; i++) await Task.Delay(10);
+        await Task.Delay(100);
+        fw.CancelCommand.Execute(null);
+        Assert.Same(run, await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10))));
+        release.Set();
+        _app.Ui.Run();
+
+        Assert.Equal(FlashPhase.Cancelled, fw.Phase);
+        Assert.Equal("reconnect COM7", _events.Last());
+    }
+
+    private sealed class StalledLink : IFlashLink
+    {
+        public string Name => "COM7";
+        public bool IsUsbJtagSerial => true;
+        public Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct) => throw new LinkStalledException("COM7 does not accept data: nothing on the device reads from its USB port.");
+        public Task<int> ReadAsync(Memory<byte> buffer, TimeSpan timeout, CancellationToken ct) => Task.FromResult(0);
+        public void DiscardInput() { }
+        public Task<bool> TryReopenAsync(CancellationToken ct) => Task.FromResult(false);
+        public void SetLines(bool dtr, bool rts) { }
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task A_port_that_takes_no_data_fails_at_once_with_an_explanation()
+    {
+        var (fw, _) = await RealPortSetupAsync(null, open: _ => new StalledLink());
+        fw.ManualBoot = true;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await fw.FlashCommand.ExecuteAsync(null);
+        _app.Ui.Run();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5));
+        Assert.Equal(FlashPhase.Failed, fw.Phase);
+        Assert.Contains("does not accept data", fw.ResultText);
+        Assert.Equal("reconnect COM7", _events.Last());
+    }
+
+    [Fact]
+    public async Task A_device_that_does_not_answer_in_manual_mode_says_what_to_untick()
+    {
+        var rom = new SimulatedRom(new SimulatedRomOptions { EntersBootloader = false });
+        var (fw, _) = await RealPortSetupAsync(rom);
+        fw.ManualBoot = true;
+        await fw.FlashCommand.ExecuteAsync(null);
+        _app.Ui.Run();
+
+        Assert.Equal(FlashPhase.Failed, fw.Phase);
+        Assert.Contains("untick", fw.ResultText);
+    }
+
     [Fact]
     public async Task A_damaged_firmware_cannot_be_flashed()
     {

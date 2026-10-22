@@ -274,6 +274,11 @@ public static class FirmwareFlasher
         {
             return Fail(ex.Message + (written > 0 ? " The device may be left without working firmware until it is flashed again." : ""));
         }
+        catch (LinkStalledException ex)
+        {
+            state.LinkLost = true;
+            return Fail(ex.Message);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException)
         {
             state.LinkLost = true;

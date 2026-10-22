@@ -59,6 +59,9 @@ internal sealed class OtaRig
     private long _poweredAt;
     private string? _pendingFw;
     public string? FwAfterActivate { get; set; }                       // null: the new version; otherwise what the "rebooted" timer reports (a rollback)
+    /// <summary>The fleet list learns of a new boot counter this long after the timer restarted (the state report of the timer is faster).</summary>
+    public int BootReportDelayMs { get; set; }
+    private readonly List<(long At, int Boot)> _bootLog = new() { (long.MinValue / 2, 7) };
     public int FramesToTimer { get; private set; }
     public int FramesToPc { get; private set; }
     private int _sentThisTick;
@@ -115,6 +118,7 @@ internal sealed class OtaRig
         {
             Powered = true;
             Boot++;
+            _bootLog.Add((Now, Boot));
             if (_pendingFw is not null) { Fw = _pendingFw; _pendingFw = null; }
             Tr.OnTimerOnline(true, Now);
         }
@@ -147,7 +151,8 @@ internal sealed class OtaRig
             }
         }
 
-        Tr.OnTimerBoot(Boot, Fw, Now);
+        int reportedBoot = _bootLog.Last(b => b.At <= Now - BootReportDelayMs).Boot;
+        Tr.OnTimerBoot(reportedBoot, Fw, Now);
         Tr.Tick(Now);
     }
 }

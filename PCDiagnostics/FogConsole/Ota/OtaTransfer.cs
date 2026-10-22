@@ -38,6 +38,12 @@ public sealed class OtaTransferOptions
 
     public int MaxRestarts { get; init; } = 3;
 
+    /// <summary>
+    /// A restart of the timer is noticed twice: by its state report (idle, no session) and, a moment later, by the boot counter in the fleet list.
+    /// The second sign within this time after the transfer was started again is the same restart and is ignored.
+    /// </summary>
+    public int RestartDedupMs { get; init; } = 15_000;
+
     // ---- the estimate of the time left (the speed shown in the UI uses a short window; the estimate needs a steadier one) ----
 
     /// <summary>The first seconds of the transfer are not used for the estimate: the pipe is still filling and looks far slower than it is.</summary>
@@ -84,6 +90,8 @@ public sealed class OtaTransfer
     private int _maxAcked = -1;
     private long _phaseStart, _lastSend, _lastState, _lastPoll;
     private int _restarts, _resent, _frames;
+    private readonly HashSet<byte> _ownSessions = new();
+    private long _lastRestartAt = long.MinValue / 2;
     private int _eraseProgress, _verifyProgress;
     private bool _bootKnown;
     private int _bootBaseline;
@@ -149,6 +157,7 @@ public sealed class OtaTransfer
     {
         _session = _newSession();
         if (_session == 0) _session = 1;
+        _ownSessions.Add(_session);
         int total = _image.Chunks;
         _acked = new bool[total];
         _sentAt = new long[total];
@@ -211,6 +220,7 @@ public sealed class OtaTransfer
             return;
         }
         _restarts++;
+        _lastRestartAt = now;
         _log?.Invoke($"{reason} Starting the transfer again ({_restarts} of {_o.MaxRestarts}).");
         BeginSession(now);
     }
@@ -241,6 +251,9 @@ public sealed class OtaTransfer
                          "(the new one did not start properly, or the power was cut during its first seconds). Try again.", now);
                 break;
             default:
+                // the state report has noticed this restart already and started the transfer again: do not start it a third time on top of that
+                // (a genuine second restart is still caught: the timer then reports an idle state without a session, which restarts the transfer again)
+                if (now - _lastRestartAt < _o.RestartDedupMs) break;
                 Restart("The timer restarted during the transfer (a power cut?), so the data written so far is lost.", now);
                 break;
         }
@@ -267,6 +280,14 @@ public sealed class OtaTransfer
         }
         if (r.Session != _session)
         {
+            if (r.Error == OtaError.Busy && _ownSessions.Contains(r.Session) && Phase is OtaPhase.Beginning or OtaPhase.Erasing)
+            {
+                // the timer is still busy with a transfer WE started a moment ago (two restarts in a row): carry on with that one
+                _log?.Invoke($"The timer still holds our earlier transfer (session {r.Session:X2}); carrying on with it.");
+                _session = r.Session;
+                _lastSend = long.MinValue / 2;
+                return;
+            }
             if (r.Error == OtaError.Busy && r.Session != 0 && Phase != OtaPhase.Restarting)
                 Fail($"The timer is busy with another firmware transfer (session {r.Session:X2}). {OtaText.Error(OtaError.Busy)}", now, OtaError.Busy);
             else if (r.State == OtaState.Idle && r.Session == 0 && Phase is OtaPhase.Erasing or OtaPhase.Streaming or OtaPhase.Verifying)

@@ -105,6 +105,51 @@ public class OtaTransferTests
         }
     }
 
+    // ---- one restart of the timer is one restart of the transfer ---------------------------------------------------------
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(400)]
+    [InlineData(1500)]
+    public void A_restart_noticed_by_the_state_report_and_by_the_fleet_list_restarts_the_transfer_once(int fleetListLagMs)
+    {
+        var r = Rig(size: 300_000);
+        r.SendLimit = 1;                                   // a link that takes some seconds for the image, as a real one does
+        r.BootReportDelayMs = fleetListLagMs;
+        bool cut = false;
+        r.Run(300_000, rig =>
+        {
+            if (!cut && rig.Tr.Phase == OtaPhase.Streaming && rig.Tr.Contig > rig.Image.Chunks / 3) { cut = true; rig.PowerCut(300); }
+        });
+
+        Assert.True(cut);
+        Assert.True(r.Tr.Succeeded, r.Tr.FailureMessage);
+        Assert.Equal(1, r.Tr.Restarts);
+        AssertImageInSlot(r);
+        Assert.DoesNotContain(r.Log, l => l.Contains("busy with another"));
+    }
+
+    [Fact]
+    public void A_timer_that_is_busy_with_our_own_earlier_transfer_is_carried_on_with_not_given_up_on()
+    {
+        var r = Rig(size: 60_000);
+        bool poked = false;
+        r.Run(300_000, rig =>
+        {
+            // a false alarm about a restart while the timer still holds the running transfer: the new Begin is answered "busy" with OUR first session
+            if (!poked && rig.Tr.Phase == OtaPhase.Streaming && rig.Tr.Contig > rig.Image.Chunks / 3)
+            {
+                poked = true;
+                rig.Tr.OnTimerBoot(rig.Boot + 5, rig.Fw, rig.Now);
+            }
+        });
+
+        Assert.True(poked);
+        Assert.True(r.Tr.Succeeded, r.Tr.FailureMessage);
+        Assert.Contains(r.Log, l => l.Contains("carrying on with it"));
+        AssertImageInSlot(r);
+    }
+
     [Fact]
     public void The_time_left_includes_what_follows_the_last_chunk()
     {

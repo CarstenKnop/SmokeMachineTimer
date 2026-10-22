@@ -214,6 +214,11 @@ The *Firmware* page, section *Over the air*: choose the timer firmware, tick the
 shows its stage (probe, erase, transfer with speed, verify, restart, version check), the result and the number of re-sent chunks. A transfer to a timer that is
 offline, or on another channel, does not start. Hold-to-fog and the other commands keep working during an update, but a timer heating up (power cut) ends its transfer.
 
+A timer that restarts during the transfer (it lost its power) is noticed twice: by its state report (idle, no session) and a moment later by the boot counter
+in the fleet list. That is **one** restart, and the transfer is started again **once** (up to three times per update); the second sign within 15 s is ignored.
+If the timer still answers *busy* with a session number the sender itself started a moment before, the sender carries on with that session instead of
+giving up (it would otherwise collide with its own first attempt, because a second `Begin` with another session is refused, §6.1).
+
 ## 7. Safety
 
 * **A wrong or damaged image cannot be activated:** the SHA-256 given in `Begin` must match what was written, the image must be an ESP32-C3 image with the

@@ -37,6 +37,20 @@ public sealed class OtaTransferOptions
     public int OfflineGiveUpMs { get; init; } = 120_000;
 
     public int MaxRestarts { get; init; } = 3;
+
+    // ---- the estimate of the time left (the speed shown in the UI uses a short window; the estimate needs a steadier one) ----
+
+    /// <summary>The first seconds of the transfer are not used for the estimate: the pipe is still filling and looks far slower than it is.</summary>
+    public int EtaRampMs { get; init; } = 3_000;
+
+    /// <summary>The estimate uses the progress of the last this-many milliseconds (reports from the timer arrive in steps, a short window jumps).</summary>
+    public int EtaWindowMs { get; init; } = 30_000;
+
+    /// <summary>No estimate until the window spans at least this long.</summary>
+    public int EtaMinSpanMs { get; init; } = 3_000;
+
+    /// <summary>What follows the last chunk: the timer checks the image, switches over and restarts (measured: about 8 s). Added to the estimate.</summary>
+    public int TailSeconds { get; init; } = 8;
 }
 
 /// <summary>A snapshot of the transfer for the UI.</summary>
@@ -77,6 +91,8 @@ public sealed class OtaTransfer
     private string? _message;
     private readonly Queue<(long At, long Bytes)> _samples = new();
     private long _lastSample = long.MinValue / 2;
+    private readonly Queue<(long At, long Bytes)> _etaSamples = new();
+    private long _streamStart = -1;
 
     public OtaTransfer(OtaImage image, byte[] key, Func<byte[], bool> send, OtaTransferOptions? options = null,
         Func<byte>? newSession = null, Action<string>? log = null)
@@ -143,6 +159,8 @@ public sealed class OtaTransfer
         _report = null;
         _eraseProgress = _verifyProgress = 0;
         _samples.Clear();
+        _etaSamples.Clear();
+        _streamStart = -1;
         _lastSample = long.MinValue / 2;
         Phase = OtaPhase.Beginning;
         _phaseStart = now;
@@ -454,8 +472,26 @@ public sealed class OtaTransfer
     {
         if (now - _lastSample < 250) return;
         _lastSample = now;
-        _samples.Enqueue((now, BytesDone()));
+        long done = BytesDone();
+        _samples.Enqueue((now, done));
         while (_samples.Count > 2 && now - _samples.Peek().At > 5000) _samples.Dequeue();
+
+        if (Phase != OtaPhase.Streaming) return;
+        if (_streamStart < 0) _streamStart = now;
+        if (now - _streamStart < _o.EtaRampMs) return;
+        _etaSamples.Enqueue((now, done));
+        while (_etaSamples.Count > 2 && now - _etaSamples.Peek().At > _o.EtaWindowMs) _etaSamples.Dequeue();
+    }
+
+    /// <summary>Seconds until the timer runs the new firmware, or null while there is not yet enough to tell.</summary>
+    private double? EstimateSecondsLeft(long done)
+    {
+        if (Phase != OtaPhase.Streaming || _etaSamples.Count < 2) return null;
+        var first = _etaSamples.Peek();
+        var last = _etaSamples.Last();
+        if (last.At - first.At < _o.EtaMinSpanMs || last.Bytes <= first.Bytes) return null;
+        double speed = (last.Bytes - first.Bytes) * 1000.0 / (last.At - first.At);
+        return Math.Max(0, _image.Size - done) / speed + _o.TailSeconds;
     }
 
     public OtaProgress Snapshot(long now)
@@ -468,7 +504,7 @@ public sealed class OtaTransfer
             var last = _samples.Last();
             if (last.At > first.At) speed = Math.Max(0, (last.Bytes - first.Bytes) * 1000.0 / (last.At - first.At));
         }
-        double? eta = Phase == OtaPhase.Streaming && speed > 1 ? (_image.Size - done) / speed : null;
+        double? eta = EstimateSecondsLeft(done);
 
         (string stage, double fraction) = Phase switch
         {

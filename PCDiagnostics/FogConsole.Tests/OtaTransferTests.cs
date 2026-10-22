@@ -48,9 +48,10 @@ public class OtaTransferTests
     [Fact]
     public void Progress_speed_and_eta_are_reported_while_streaming()
     {
-        var r = Rig(size: 60_000);
+        var r = Rig(size: 1_500_000);
+        r.SendLimit = 1;                                   // a slow link: 200 frames per virtual second, so that the transfer takes a while
         OtaProgress? mid = null;
-        r.Run(120_000, rig =>
+        r.Run(900_000, rig =>
         {
             var s = rig.Tr.Snapshot(rig.Now);
             if (mid is null && s.Phase == OtaPhase.Streaming && s.Fraction > 0.5) mid = s;
@@ -61,6 +62,59 @@ public class OtaTransferTests
         Assert.NotNull(mid.EtaSeconds);
         Assert.StartsWith("Sending", mid.Stage);
         Assert.Equal(r.Image.Size, mid.BytesTotal);
+    }
+
+    /// <summary>The estimate of the time left as the progress panel shows it, against what really remained.</summary>
+    private static (List<(long Now, double Eta)> Shown, long StreamEnd, long First) RecordEstimates(OtaRig r, long maxMs)
+    {
+        var shown = new List<(long, double)>();
+        long first = -1, end = -1;
+        r.Run(maxMs, rig =>
+        {
+            var s = rig.Tr.Snapshot(rig.Now);
+            if (s.Phase == OtaPhase.Streaming)
+            {
+                if (first < 0) first = rig.Now;
+                if (s.EtaSeconds is { } e) shown.Add((rig.Now, e));
+            }
+            else if (first >= 0 && end < 0) end = rig.Now;
+        });
+        return (shown, end, first);
+    }
+
+    [Theory]
+    [InlineData(0.0, 0.0, 0.10)]
+    [InlineData(0.10, 0.10, 0.25)]
+    public void The_time_left_stays_close_to_the_truth_and_is_not_shown_while_the_pipe_fills(double toTimer, double toPc, double tolerance)
+    {
+        var r = Rig(size: 1_500_000, options: new OtaTransferOptions { TailSeconds = 0 }, seed: 7);
+        r.SendLimit = 1;
+        r.LossToTimer = toTimer;
+        r.LossToPc = toPc;
+        var (shown, end, first) = RecordEstimates(r, 900_000);
+
+        Assert.True(r.Tr.Succeeded, r.Tr.FailureMessage);
+        Assert.True(end > first + 20_000, "the transfer must last long enough to be worth an estimate");
+        Assert.NotEmpty(shown);
+        Assert.True(shown[0].Now - first >= 5_000, $"the first estimate came after {shown[0].Now - first} ms: the start-up ramp must not be extrapolated");
+        foreach (var (now, eta) in shown)
+        {
+            double truth = (end - now) / 1000.0;
+            if (truth < 3) continue;
+            Assert.True(Math.Abs(eta - truth) <= truth * tolerance + 1, $"{(now - first) / 1000.0:0.0} s into the transfer: shown {eta:0.0} s left, really {truth:0.0} s");
+        }
+    }
+
+    [Fact]
+    public void The_time_left_includes_what_follows_the_last_chunk()
+    {
+        var r = Rig(size: 1_500_000, options: new OtaTransferOptions { TailSeconds = 8 });
+        r.SendLimit = 1;
+        var (shown, end, _) = RecordEstimates(r, 900_000);
+        var last = shown[^1];
+        Assert.InRange(last.Eta, 8, 8 + 3);                         // almost all of it sent: the tail (check, switch, restart) is what is left
+        Assert.True(shown.Count > 10);
+        Assert.True(end > 0);
     }
 
     [Theory]

@@ -342,7 +342,7 @@ and is skipped with a note.
 *Contacting the timer*, *Preparing the timer's flash*, *Sending the firmware* with a bar, the speed, the time left and how many pieces had to be sent again,
 *The timer checks the firmware*, *Switching to the new firmware*, *Waiting for the timer to restart* — and ends with *Updated 2.1.0 → 2.2.0 in 11 s*, or with a plain reason why not.
 The time left appears after about six seconds (the first seconds of a transfer are not representative), is based on the progress of the last half minute and
-includes the check, switch-over and restart that follow the last piece (about eight seconds). **Cancel** stops the update; the timer
+includes the check, switch-over and restart that follow the last piece (about six seconds). **Cancel** stops the update; the timer
 that was being updated keeps its old firmware. The **Log** underneath records every step and can be copied for a bug report.
 
 ![Two timers, one finished, one sending](../PCDiagnostics/docs/firmware-ota-progress-dark.png)

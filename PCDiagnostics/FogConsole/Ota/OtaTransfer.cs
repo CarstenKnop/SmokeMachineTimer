@@ -49,8 +49,8 @@ public sealed class OtaTransferOptions
     /// <summary>No estimate until the window spans at least this long.</summary>
     public int EtaMinSpanMs { get; init; } = 3_000;
 
-    /// <summary>What follows the last chunk: the timer checks the image, switches over and restarts (measured: about 8 s). Added to the estimate.</summary>
-    public int TailSeconds { get; init; } = 8;
+    /// <summary>What follows the last chunk: the timer checks the image, switches over and restarts (measured on a real timer: 4 to 8 s). Added to the estimate.</summary>
+    public int TailSeconds { get; init; } = 6;
 }
 
 /// <summary>A snapshot of the transfer for the UI.</summary>

@@ -425,6 +425,41 @@ public class RomLoaderTests
         Assert.Equal(0x05, ex.Error);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task The_status_is_read_from_behind_the_payload_with_or_without_reserved_bytes(int reservedBytes)
+    {
+        // A real ESP32 ROM answers with: payload, 2 status bytes, then 2 more reserved bytes (esptool reads data[resp_data_len : resp_data_len + 2]).
+        // Reading the status from the END of the answer made the 32 character MD5 look like 34 bytes ("MD5 of unexpected size") and hid error codes.
+        var (_, loader) = await ConnectedAsync(new SimulatedRomOptions { ReservedStatusBytes = reservedBytes });
+
+        var blank = Convert.ToHexString(System.Security.Cryptography.MD5.HashData(Enumerable.Repeat((byte)0xFF, 4096).ToArray())).ToLowerInvariant();
+        Assert.Equal(blank, await loader.FlashMd5Async(0, 4096, CancellationToken.None));
+        Assert.Equal(0u + Esp32C3.ChipId, await loader.GetChipIdAsync(CancellationToken.None));
+        Assert.Equal("40:4C:CA:5B:12:34", await loader.ReadMacAsync(CancellationToken.None));
+
+        var ex = await Assert.ThrowsAsync<RomException>(() => loader.CheckAsync(0x77, ReadOnlyMemory<byte>.Empty, 0, null, CancellationToken.None));
+        Assert.Equal(0x05, ex.Error);
+        var ex2 = await Assert.ThrowsAsync<RomException>(() => loader.FlashMd5Async(0x3FFFF0, 4096, CancellationToken.None));     // beyond the flash: an error answer
+        Assert.Equal(0x05, ex2.Error);
+    }
+
+    [Fact]
+    public async Task A_corrupted_data_block_is_reported_as_a_checksum_error_by_the_chip()
+    {
+        var (_, loader) = await ConnectedAsync();
+        await loader.SpiAttachAsync(CancellationToken.None);
+        await loader.SetFlashParametersAsync(Esp32C3.FlashBytes, CancellationToken.None);
+        await loader.FlashBeginAsync(1024, 0x10000, CancellationToken.None);
+
+        var p = new byte[16 + RomLoader.FlashBlockSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0), RomLoader.FlashBlockSize);
+        var ex = await Assert.ThrowsAsync<RomException>(() => loader.CheckAsync(RomOp.FlashData, p, checksum: 0x12345678, TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.Equal(0x07, ex.Error);
+        Assert.Contains("corrupted packet", ex.Message);
+    }
+
     [Fact]
     public void The_checksum_is_the_xor_of_the_data_seeded_with_0xEF()
     {

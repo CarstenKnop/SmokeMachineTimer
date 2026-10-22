@@ -78,7 +78,13 @@ public sealed record RomReply(uint Value, byte[] Data);
 public sealed class RomLoader
 {
     public const int FlashBlockSize = 0x400;
+    /// <summary>
+    /// What follows the payload of every answer: two status bytes (failed flag, error code) and, on every chip except the ESP8266, two more
+    /// reserved bytes. The status therefore sits right after the payload (esptool: <c>data[resp_data_len : resp_data_len + 2]</c>), not at the end.
+    /// </summary>
     public const int StatusBytes = 2;
+
+    public const int ReservedBytes = 2;
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
 
@@ -248,15 +254,31 @@ public sealed class RomLoader
         }
     }
 
-    /// <summary>Like <see cref="CommandAsync"/>, but checks the status bytes. The returned data has them removed.</summary>
-    public async Task<RomReply> CheckAsync(byte op, ReadOnlyMemory<byte> payload, uint checksum, TimeSpan? timeout, CancellationToken ct)
+    /// <summary>
+    /// Like <see cref="CommandAsync"/>, but checks the status. <paramref name="responseLength"/> is how many payload bytes the command
+    /// answers with (0 for most, 32 for the MD5 request, 20 for the security info); the status bytes follow them, then possibly two
+    /// reserved bytes that are ignored. The returned data is the payload only.
+    /// </summary>
+    public async Task<RomReply> CheckAsync(byte op, ReadOnlyMemory<byte> payload, uint checksum, TimeSpan? timeout, CancellationToken ct, int responseLength = 0)
     {
         var reply = await CommandAsync(op, payload, checksum, timeout ?? DefaultTimeout, ct).ConfigureAwait(false);
-        if (reply.Data.Length < StatusBytes) throw new RomException(op, 0xFF, $"Short answer to command 0x{op:X2}.");
-        var status = reply.Data.AsSpan(reply.Data.Length - StatusBytes);
-        if (status[0] != 0)
-            throw new RomException(op, status[1], $"Command 0x{op:X2} failed: {RomException.Describe(status[1])}.");
-        return new RomReply(reply.Value, reply.Data.AsSpan(0, reply.Data.Length - StatusBytes).ToArray());
+        var payloadBytes = ParseStatus(op, reply.Data, responseLength);
+        return new RomReply(reply.Value, payloadBytes);
+    }
+
+    /// <summary>Checks the status bytes behind a payload of <paramref name="responseLength"/> bytes and returns that payload.</summary>
+    private static byte[] ParseStatus(byte op, byte[] data, int responseLength)
+    {
+        if (data.Length < responseLength + StatusBytes)
+        {
+            // an error answer has no payload: the status is the first thing in it
+            if (data.Length >= StatusBytes && data[0] != 0)
+                throw new RomException(op, data[1], $"Command 0x{op:X2} failed: {RomException.Describe(data[1])}.");
+            throw new RomException(op, 0xFF, $"Short answer to command 0x{op:X2} ({data.Length} bytes, expected at least {responseLength + StatusBytes}).");
+        }
+        if (data[responseLength] != 0)
+            throw new RomException(op, data[responseLength + 1], $"Command 0x{op:X2} failed: {RomException.Describe(data[responseLength + 1])}.");
+        return data.AsSpan(0, responseLength).ToArray();
     }
 
     // ---- registers and identity -----------------------------------------------------------------------------------
@@ -283,7 +305,7 @@ public sealed class RomLoader
     {
         try
         {
-            var r = await CheckAsync(RomOp.GetSecurityInfo, ReadOnlyMemory<byte>.Empty, 0, null, ct).ConfigureAwait(false);
+            var r = await CheckAsync(RomOp.GetSecurityInfo, ReadOnlyMemory<byte>.Empty, 0, null, ct, responseLength: 20).ConfigureAwait(false);
             // flags(4) flash_crypt_cnt(1) key_purposes(7) chip_id(4) eco_version(4)
             if (r.Data.Length >= 16) return BinaryPrimitives.ReadUInt32LittleEndian(r.Data.AsSpan(12));
         }
@@ -366,13 +388,24 @@ public sealed class RomLoader
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0), offset);
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(4), length);
         var timeout = TimeSpan.FromSeconds(Math.Max(3, 8.0 * length / 1e6));
-        var r = await CheckAsync(RomOp.SpiFlashMd5, p, 0, timeout, ct).ConfigureAwait(false);
-        return r.Data.Length switch
+        var reply = await CommandAsync(RomOp.SpiFlashMd5, p, 0, timeout, ct).ConfigureAwait(false);
+
+        // the ROM answers with the MD5 as 32 hex characters, a flasher stub with 16 raw bytes; the status follows either
+        int n = reply.Data.Length >= 32 + StatusBytes ? 32 : 16;
+        byte[] md5;
+        try
         {
-            32 => Encoding.ASCII.GetString(r.Data).ToLowerInvariant(),
-            16 => Convert.ToHexString(r.Data).ToLowerInvariant(),
-            _ => throw new RomException(RomOp.SpiFlashMd5, 0xFF, "The bootloader returned an MD5 of unexpected size."),
-        };
+            md5 = ParseStatus(RomOp.SpiFlashMd5, reply.Data, n);
+        }
+        catch (RomException ex) when (ex.Error == 0xFF)
+        {
+            throw new RomException(RomOp.SpiFlashMd5, 0xFF, $"{ex.Message} Answer: {Convert.ToHexString(reply.Data)}");
+        }
+        if (n == 16) return Convert.ToHexString(md5).ToLowerInvariant();
+        var text = Encoding.ASCII.GetString(md5).ToLowerInvariant();
+        if (!text.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            throw new RomException(RomOp.SpiFlashMd5, 0xFF, $"The bootloader returned an MD5 that is not hexadecimal. Answer: {Convert.ToHexString(reply.Data)}");
+        return text;
     }
 
     /// <summary>The checksum the ROM wants in the header of a data packet: XOR of all bytes, seeded with 0xEF.</summary>

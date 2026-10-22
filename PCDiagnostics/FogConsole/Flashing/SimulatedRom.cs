@@ -23,6 +23,9 @@ public sealed class SimulatedRomOptions
     /// <summary>Behaves as if the cable was pulled after n data blocks (-1 = never).</summary>
     public int DropLinkAtBlock { get; init; } = -1;
 
+    /// <summary>Reserved bytes the ROM appends behind the two status bytes of every answer: 2 on the real chips (the default), 0 on older ones.</summary>
+    public int ReservedStatusBytes { get; init; } = RomLoader.ReservedBytes;
+
     /// <summary>Initial flash contents; null = erased (0xFF).</summary>
     public byte[]? InitialFlash { get; init; }
 
@@ -365,10 +368,12 @@ public sealed class SimulatedRom : IFlashLink
     private void Reply(byte op, uint value, byte[]? data = null)
     {
         data ??= Array.Empty<byte>();
-        var packet = new byte[8 + data.Length + RomLoader.StatusBytes];
+        // like the real ROM: payload, two status bytes, two reserved bytes (the esptool trace of a real chip reads this way)
+        int tail = RomLoader.StatusBytes + _o.ReservedStatusBytes;
+        var packet = new byte[8 + data.Length + tail];
         packet[0] = 0x01;
         packet[1] = op;
-        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2), (ushort)(data.Length + RomLoader.StatusBytes));
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2), (ushort)(data.Length + tail));
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4), value);
         data.CopyTo(packet, 8);
         Enqueue(Slip.Encode(packet));
@@ -376,10 +381,11 @@ public sealed class SimulatedRom : IFlashLink
 
     private void Error(byte op, byte code)
     {
-        var packet = new byte[8 + RomLoader.StatusBytes];
+        int tail = RomLoader.StatusBytes + _o.ReservedStatusBytes;
+        var packet = new byte[8 + tail];
         packet[0] = 0x01;
         packet[1] = op;
-        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2), RomLoader.StatusBytes);
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2), (ushort)tail);
         packet[8] = 1;
         packet[9] = code;
         Enqueue(Slip.Encode(packet));
